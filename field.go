@@ -134,22 +134,18 @@ func (f *field) setDec(dec int) {
 	f.Dec = byte(dec)
 }
 
-// Read/write
-
-func (f *field) read(reader io.Reader) {
-	if err := binary.Read(reader, binary.LittleEndian, f); err != nil {
-		panic(err)
-	}
+// read field info from io.Reader
+func (f *field) read(reader io.Reader) error {
+	err := binary.Read(reader, binary.LittleEndian, f)
+	return err
 }
 
-func (f *field) write(writer io.Writer) {
+func (f *field) write(writer io.Writer) error {
 	tmp := f.Offset
 	f.Offset = 0
 	defer func() { f.Offset = tmp }()
 
-	if err := binary.Write(writer, binary.LittleEndian, f); err != nil {
-		panic(err)
-	}
+	return binary.Write(writer, binary.LittleEndian, f)
 }
 
 // Buffer

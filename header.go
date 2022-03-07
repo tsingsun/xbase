@@ -27,21 +27,22 @@ func newHeader() *header {
 	return h
 }
 
-// Read/write
-
-func (h *header) read(reader io.Reader) {
+// read header info
+func (h *header) read(reader io.Reader) error {
 	if err := binary.Read(reader, binary.LittleEndian, h); err != nil {
-		panic(err)
+		return err
 	}
 	if h.DbfId != dbfId {
-		panic(fmt.Errorf("not DBF file"))
+		return fmt.Errorf("not DBF file")
 	}
+	return nil
 }
 
-func (h *header) write(writer io.Writer) {
+func (h *header) write(writer io.Writer) error {
 	if err := binary.Write(writer, binary.LittleEndian, h); err != nil {
-		panic(err)
+		return err
 	}
+	return nil
 }
 
 // Field count

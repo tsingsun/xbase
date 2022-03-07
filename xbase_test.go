@@ -1,6 +1,7 @@
 package xbase
 
 import (
+	"github.com/stretchr/testify/assert"
 	"io/ioutil"
 	"os"
 	"strings"
@@ -59,7 +60,7 @@ func TestCreateEmptyFile(t *testing.T) {
 	require.Equal(t, true, db.EOF())
 	require.Equal(t, true, db.BOF())
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 
 	testBytes := readFile("./testdata/test.dbf")
@@ -68,17 +69,9 @@ func TestCreateEmptyFile(t *testing.T) {
 
 }
 
-func TestSetPanic(t *testing.T) {
-	db := New()
-	db.SetPanic(true)
-	require.Equal(t, true, db.IsPanic())
-	require.Panics(t, func() { db.CreateFile("./testdata/test.dbf") })
-	require.Error(t, db.Error())
-}
-
 func TestSetFieldValueError(t *testing.T) {
-	db := New()
-	db.OpenFile("./testdata/rec0.dbf", true)
+	db, err := Open("./testdata/rec0.dbf", true)
+	assert.NoError(t, err)
 	db.Add()
 
 	db.SetFieldValue(0, true)
@@ -105,7 +98,7 @@ func TestAddEmptyRec(t *testing.T) {
 	require.Equal(t, false, db.EOF())
 	require.Equal(t, false, db.BOF())
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 
 	testBytes := readFile("./testdata/test.dbf")
@@ -141,7 +134,7 @@ func TestAddRecords(t *testing.T) {
 
 	require.Equal(t, int64(3), db.RecCount())
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 
 	testBytes := readFile("./testdata/test.dbf")
@@ -150,9 +143,8 @@ func TestAddRecords(t *testing.T) {
 }
 
 func TestOpenEmptyFile(t *testing.T) {
-	db := New()
-	db.OpenFile("./testdata/rec0.dbf", true)
-
+	db, err := Open("./testdata/rec0.dbf", true)
+	assert.NoError(t, err)
 	require.Equal(t, int64(0), db.RecCount())
 	require.Equal(t, 5, db.FieldCount())
 	require.Equal(t, true, db.EOF())
@@ -170,13 +162,13 @@ func TestOpenEmptyFile(t *testing.T) {
 	require.Equal(t, true, db.EOF())
 	require.Equal(t, true, db.BOF())
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 }
 
 func TestReadEmptyRec(t *testing.T) {
-	db := New()
-	db.OpenFile("./testdata/rec1.dbf", true)
+	db, err := Open("./testdata/rec1.dbf", true)
+	assert.NoError(t, err)
 
 	db.First()
 	require.Equal(t, "", db.FieldValueAsString(1))
@@ -186,13 +178,13 @@ func TestReadEmptyRec(t *testing.T) {
 	var d time.Time
 	require.Equal(t, d, db.FieldValueAsDate(5))
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 }
 
 func TestReadNext(t *testing.T) {
-	db := New()
-	db.OpenFile("./testdata/rec3.dbf", true)
+	db, err := Open("./testdata/rec3.dbf", true)
+	assert.NoError(t, err)
 
 	db.First()
 	require.Equal(t, int64(1), db.RecNo())
@@ -218,13 +210,13 @@ func TestReadNext(t *testing.T) {
 	db.Next()
 	require.Equal(t, true, db.EOF())
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 }
 
 func TestReadPrev(t *testing.T) {
-	db := New()
-	db.OpenFile("./testdata/rec3.dbf", true)
+	db, err := Open("./testdata/rec3.dbf", true)
+	assert.NoError(t, err)
 
 	db.Last()
 	require.Equal(t, int64(3), db.RecNo())
@@ -250,7 +242,7 @@ func TestReadPrev(t *testing.T) {
 	db.Prev()
 	require.Equal(t, true, db.BOF())
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 }
 
@@ -268,8 +260,8 @@ func copyFile(src, dst string) {
 func TestOpenEditRec(t *testing.T) {
 	copyFile("./testdata/rec3.dbf", "./testdata/test1.dbf")
 
-	db := New()
-	db.OpenFile("./testdata/test1.dbf", false)
+	db, err := Open("./testdata/test1.dbf", false)
+	assert.NoError(t, err)
 
 	db.GoTo(2)
 	db.SetFieldValue(1, "Edit")
@@ -280,15 +272,15 @@ func TestOpenEditRec(t *testing.T) {
 	require.Equal(t, "Edit", db.FieldValueAsString(1))
 	require.Equal(t, int64(3), db.RecCount())
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 }
 
 func TestOpenAddRec(t *testing.T) {
 	copyFile("./testdata/rec3.dbf", "./testdata/test2.dbf")
 
-	db := New()
-	db.OpenFile("./testdata/test2.dbf", false)
+	db, err := Open("./testdata/test2.dbf", false)
+	assert.NoError(t, err)
 
 	db.Add()
 	db.SetFieldValue(1, "Add")
@@ -299,7 +291,7 @@ func TestOpenAddRec(t *testing.T) {
 	require.Equal(t, "Add", db.FieldValueAsString(1))
 	require.Equal(t, int64(4), db.RecCount())
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 }
 
@@ -330,14 +322,13 @@ func TestCreateEditRec(t *testing.T) {
 
 	require.Equal(t, int64(3), db.RecCount())
 
-	db.CloseFile()
+	db.Close()
 	require.NoError(t, db.Error())
 }
 
 func TestTryGoTo(t *testing.T) {
 	db := New()
-	db.SetPanic(true)
-	defer db.CloseFile()
+	defer db.Close()
 	db.AddField("NAME", "C", 30)
 	db.CreateFile("./testdata/test.dbf")
 	db.Add()
@@ -349,9 +340,9 @@ func TestTryGoTo(t *testing.T) {
 	wg.Add(1)
 	long := strings.Repeat("abc", 10)
 	go func() {
-		otdb := New()
-		otdb.SetPanic(true)
-		otdb.OpenFile("./testdata/test.dbf", false)
+		otdb, err := Open("./testdata/test.dbf", false)
+		assert.NoError(t, err)
+
 		otdb.Add()
 		otdb.SetFieldValue(1, long)
 		otdb.Save()
@@ -360,7 +351,7 @@ func TestTryGoTo(t *testing.T) {
 		otdb.SetFieldValue(1, "abc")
 		otdb.Save()
 		otdb.Flush()
-		otdb.CloseFile()
+		otdb.Close()
 		wg.Done()
 	}()
 	wg.Wait()
@@ -369,7 +360,7 @@ func TestTryGoTo(t *testing.T) {
 	} else {
 		t.Fatal()
 	}
-	db.goTo(3)
+	db.GoTo(3)
 	require.Equal(t, int64(3), db.recCount())
 	db.Add()
 	db.SetFieldValue(1, "AbcAbc")
@@ -380,7 +371,7 @@ func TestTryGoTo(t *testing.T) {
 	} else {
 		t.Fatal()
 	}
-	db.goTo(5)
+	db.GoTo(5)
 	if db.err == nil {
 		t.Fatal("must error")
 	}

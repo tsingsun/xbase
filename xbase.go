@@ -1,4 +1,3 @@
-// dbf package implements functions for working with DBF files.
 package xbase
 
 import (
@@ -24,17 +23,17 @@ const (
 )
 
 type XBase struct {
-	header  *header
-	fields  []*field
-	file    *os.File
-	buf     []byte
-	err     error
-	recNo   int64
-	isAdd   bool
-	isMod   bool
-	isPanic bool
-	encoder *encoding.Encoder
-	decoder *encoding.Decoder
+	header *header
+	fields []*field
+	file   *os.File
+	// rawBuffer is the current record buffer .
+	rawBuffer []byte
+	err       error
+	recNo     int64
+	isAdd     bool
+	isMod     bool
+	encoder   *encoding.Encoder
+	decoder   *encoding.Decoder
 }
 
 type cPage struct {
@@ -105,8 +104,6 @@ func pageByCode(code byte) int {
 	return 0
 }
 
-// Public
-
 // New creates a XBase object to work with a DBF file.
 func New() *XBase {
 	return &XBase{header: newHeader()}
@@ -114,56 +111,73 @@ func New() *XBase {
 
 // CreateFile creates a new file in DBF format.
 // If a file with that name exists, it will be overwritten.
-func (db *XBase) CreateFile(name string) {
-	if db.err != nil {
+func (db *XBase) CreateFile(name string) (err error) {
+	if err = db.checkFields(); err != nil {
 		return
 	}
-	defer db.wrapError("CreateFile")
-	db.checkFields()
-	db.fileCreate(name)
+	if db.file, err = os.Create(name); err != nil {
+		return
+	}
 	db.header.setFieldCount(len(db.fields))
 	db.header.RecSize = db.calcRecSize()
-	db.writeHeader()
-	db.writeFields()
-	db.fileWrite([]byte{headerEnd})
+	if err := db.writeHeader(); err != nil {
+		return
+	}
+	if err = db.writeFields(); err != nil {
+		return
+	}
+	if err = db.fileWrite([]byte{headerEnd}); err != nil {
+		return
+	}
 	db.makeBuf()
 	db.isMod = true
+	return
 }
 
-// OpenFile opens an existing DBF file.
-func (db *XBase) OpenFile(name string, readOnly bool) {
-	if db.err != nil {
+// Open opens an existing DBF file.
+func Open(name string, readOnly bool) (db *XBase, err error) {
+	db = New()
+	if readOnly {
+		db.file, err = os.Open(name)
+	} else {
+		db.file, err = os.OpenFile(name, os.O_RDWR, 0666)
+	}
+	if err != nil {
 		return
 	}
-	defer db.wrapError("OpenFile")
-	db.fileOpen(name, readOnly)
-	db.header.read(db.file)
-	db.readFields()
+
+	if err = db.header.read(db.file); err != nil {
+		return nil, err
+	}
+
+	if err = db.readFields(); err != nil {
+		return nil, err
+	}
 	db.makeBuf()
 	db.SetCodePage(db.CodePage())
+	return db, nil
 }
 
-// CloseFile closes a previously opened or created DBF file.
-func (db *XBase) CloseFile() {
-	if db.err != nil {
-		return
+// Close closes a previously opened or created DBF file.
+func (db *XBase) Close() error {
+	if db.file == nil {
+		return nil
 	}
-	defer db.wrapError("CloseFile")
 	if db.isMod {
 		db.header.setModDate(time.Now())
-		db.writeHeader()
-		db.writeFileEnd()
+		if err := db.writeHeader(); err != nil {
+			return err
+		}
+		if err := db.writeFileEnd(); err != nil {
+			return err
+		}
 	}
-	db.fileClose()
+	return db.file.Close()
 }
 
 // First positions the object to the first record.
-func (db *XBase) First() {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError("First")
-	db.goTo(1)
+func (db *XBase) First() error {
+	return db.GoTo(1)
 }
 
 // Last positions the object to the last record.
@@ -172,7 +186,7 @@ func (db *XBase) Last() {
 		return
 	}
 	defer db.wrapError("Last")
-	db.goTo(db.recCount())
+	db.GoTo(db.recCount())
 }
 
 // Next positions the object to the next record.
@@ -181,7 +195,7 @@ func (db *XBase) Next() {
 		return
 	}
 	defer db.wrapError("Next")
-	db.goTo(db.recNo + 1)
+	db.GoTo(db.recNo + 1)
 }
 
 // Prev positions the object to the previous record.
@@ -190,66 +204,13 @@ func (db *XBase) Prev() {
 		return
 	}
 	defer db.wrapError("Prev")
-	db.goTo(db.recNo - 1)
+	db.GoTo(db.recNo - 1)
 }
 
 // RecNo returns the sequence number of the current record.
 // Numbering starts from 1.
 func (db *XBase) RecNo() int64 {
 	return db.recNo
-}
-
-// GoTo allows you to go to a record by its ordinal number.
-// Numbering starts from 1.
-func (db *XBase) GoTo(recNo int64) {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError("GoTo")
-	db.goTo(recNo)
-}
-
-// TryGoTo allows you to go to a record by number is out range.
-// if isSuccess is false ,rowNo will be RecCount
-// Numbering starts from 1.
-func (db *XBase) TryGoTo(recNo int64) (isSuccess bool) {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError("TryGoTo")
-	if recNo < 1 {
-		db.recNo = 0
-		return
-	}
-	if recNo <= db.recCount() {
-		db.recNo = recNo
-		db.readRec()
-		return true
-	}
-	db.recNo = recNo
-	db.seekRec()
-	//db.fileRead(db.buf)
-	if n, err := db.file.Read(db.buf); err != nil {
-		if err == io.EOF {
-			db.err = io.EOF
-		} else {
-			panic(err)
-		}
-	} else if n == 1 && len(db.buf) > 1 {
-		db.err = io.EOF
-	}
-
-	if db.Error() != nil {
-		//reset
-		db.err = nil
-		db.recNo = int64(db.header.RecCount)
-		return false
-	}
-
-	if recNo > db.recCount() {
-		db.header.RecCount = uint32(recNo)
-	}
-	return true
 }
 
 // EOF returns true if end of file is reached or error.
@@ -275,8 +236,8 @@ func (db *XBase) ReadLine() ([]string, error) {
 	if db.err != nil {
 		return nil, db.err
 	}
-	var buffer = make([]byte, len(db.buf))
-	copy(buffer, db.buf)
+	var buffer = make([]byte, len(db.rawBuffer))
+	copy(buffer, db.rawBuffer)
 	var sl []string
 	for _, f := range db.fields {
 		s := strings.TrimSpace(string(f.buffer(buffer)))
@@ -293,7 +254,7 @@ func (db *XBase) FieldValueAsString(fieldNo int) string {
 		return ""
 	}
 	defer db.wrapFieldError("FieldValueAsString", fieldNo)
-	return db.fieldByNo(fieldNo).stringValue(db.buf, db.decoder)
+	return db.fieldByNo(fieldNo).stringValue(db.rawBuffer, db.decoder)
 }
 
 // FieldValueAsInt returns the integer value of the field of the current record.
@@ -303,7 +264,7 @@ func (db *XBase) FieldValueAsInt(fieldNo int) int64 {
 		return 0
 	}
 	defer db.wrapFieldError("FieldValueAsInt", fieldNo)
-	return db.fieldByNo(fieldNo).intValue(db.buf)
+	return db.fieldByNo(fieldNo).intValue(db.rawBuffer)
 }
 
 // FieldValueAsFloat returns the float value of the field of the current record.
@@ -313,7 +274,7 @@ func (db *XBase) FieldValueAsFloat(fieldNo int) float64 {
 		return 0
 	}
 	defer db.wrapFieldError("FieldValueAsFloat", fieldNo)
-	return db.fieldByNo(fieldNo).floatValue(db.buf)
+	return db.fieldByNo(fieldNo).floatValue(db.rawBuffer)
 }
 
 // FieldValueAsBool returns the boolean value of the field of the current record.
@@ -323,7 +284,7 @@ func (db *XBase) FieldValueAsBool(fieldNo int) bool {
 		return false
 	}
 	defer db.wrapFieldError("FieldValueAsBool", fieldNo)
-	return db.fieldByNo(fieldNo).boolValue(db.buf)
+	return db.fieldByNo(fieldNo).boolValue(db.rawBuffer)
 }
 
 // FieldValueAsDate returns the date value of the field of the current record.
@@ -334,7 +295,7 @@ func (db *XBase) FieldValueAsDate(fieldNo int) time.Time {
 		return d
 	}
 	defer db.wrapFieldError("FieldValueAsDate", fieldNo)
-	return db.fieldByNo(fieldNo).dateValue(db.buf)
+	return db.fieldByNo(fieldNo).dateValue(db.rawBuffer)
 }
 
 // SetFieldValue sets the field value of the current record.
@@ -345,16 +306,12 @@ func (db *XBase) SetFieldValue(fieldNo int, value interface{}) {
 		return
 	}
 	defer db.wrapFieldError("SetFieldValue", fieldNo)
-	db.fieldByNo(fieldNo).setValue(db.buf, value, db.encoder)
+	db.fieldByNo(fieldNo).setValue(db.rawBuffer, value, db.encoder)
 }
 
 // Add adds a new empty record.
 // To save the changes, you need to call the Save method.
 func (db *XBase) Add() {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError("Add")
 	db.isAdd = true
 	db.clearBuf()
 }
@@ -363,25 +320,34 @@ func (db *XBase) Add() {
 // Before calling it, all changes to the object were made
 // only in memory and will be lost when you move to another record
 // or close the file.
-func (db *XBase) Save() {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError("Save")
+func (db *XBase) Save() error {
 	if db.isAdd {
-		db.appendRec()
+		db.recNo = db.recCount() + 1
+		if err := db.seekRecord(); err != nil {
+			return err
+		}
+		if err := db.fileWrite(db.rawBuffer); err != nil {
+			return err
+		}
+		db.header.RecCount++
 		db.isAdd = false
 	} else {
-		db.writeRec()
+		if err := db.checkRecNo(); err != nil {
+			return err
+		}
+		//edit
+		if err := db.seekRecord(); err != nil {
+			return err
+		}
+		if err := db.fileWrite(db.rawBuffer); err != nil {
+			return err
+		}
 	}
 	db.isMod = true
+	return nil
 }
 
 func (db *XBase) Flush() {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError("Flush")
 	if db.isMod {
 		db.header.setModDate(time.Now())
 		db.writeHeader()
@@ -394,37 +360,21 @@ func (db *XBase) Flush() {
 // The record is not physically deleted from the file
 // and can be subsequently restored.
 func (db *XBase) Del() {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError("Del")
-	db.buf[0] = '*'
+	db.rawBuffer[0] = '*'
 }
 
 // RecDeleted returns the value of the delete flag for the current record.
 func (db *XBase) RecDeleted() bool {
-	if db.err != nil {
-		return false
-	}
-	defer db.wrapError("RecDeleted")
-	return db.buf[0] == '*'
+	return db.rawBuffer[0] == '*'
 }
 
 // Recall removes the deletion mark from the current record.
 func (db *XBase) Recall() {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError("Recall")
-	db.buf[0] = ' '
+	db.rawBuffer[0] = ' '
 }
 
 // Clear zeroes the field values ​​of the current record.
 func (db *XBase) Clear() {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError("Clear")
 	db.clearBuf()
 }
 
@@ -480,10 +430,6 @@ func (db *XBase) FieldNo(name string) int {
 //     db.AddField("FLAG", "L")
 //     db.AddField("DATE", "D")
 func (db *XBase) AddField(name string, typ string, opts ...int) {
-	if db.err != nil {
-		return
-	}
-	defer db.wrapError(fmt.Sprintf("AddField: field %q", name))
 	length := 0
 	dec := 0
 	if len(opts) > 0 {
@@ -540,50 +486,49 @@ func (db *XBase) Error() error {
 	return db.err
 }
 
-// SetPanic sets panic mode on errors.
-// By default, the object does not panic.
-func (db *XBase) SetPanic(flag bool) {
-	db.isPanic = flag
-}
-
-// IsPanic returns true if panic mode is set.
-func (db *XBase) IsPanic() bool {
-	return db.isPanic
-}
-
-// Private
-
-func (db *XBase) writeFileEnd() {
+// writeFileEnd wreter dbf file end tag
+func (db *XBase) writeFileEnd() error {
 	size := int64(db.header.DataOffset) + db.RecCount()*int64(db.header.RecSize) + 1
 	// check file size
 	fi, err := db.file.Stat()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	if fi.Size()+1 == size {
-		db.fileSeek(0, 2) // end file position
-		db.fileWrite([]byte{fileEnd})
+		if _, err = db.file.Seek(0, 2); err != nil {
+			// end file position
+			return err
+		}
+		if err = db.fileWrite([]byte{fileEnd}); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
-func (db *XBase) goTo(recNo int64) {
-	if recNo < 1 {
-		db.recNo = 0
-		return
+// GoTo allows you to go to a record by its ordinal number.
+// Numbering starts from 1.
+func (db *XBase) GoTo(recNo int64) (err error) {
+	if db.BOF() {
+		return fmt.Errorf("can't goto:%d", recNo)
 	}
 	if recNo > db.recCount() {
-		if db.TryGoTo(recNo) {
-			return
-		}
-		db.recNo = db.recCount() + 1
-		return
+		return fmt.Errorf("can't goto:%d", recNo)
 	}
 	db.recNo = recNo
-	db.readRec()
+	if err := db.seekRecord(); err != nil {
+		return err
+	}
+	if n, err := db.file.Read(db.rawBuffer); err != nil {
+		return err
+	} else if n != len(db.rawBuffer) {
+		return io.EOF
+	}
+	return nil
 }
 
 func (db *XBase) makeBuf() {
-	db.buf = make([]byte, int(db.header.RecSize))
+	db.rawBuffer = make([]byte, int(db.header.RecSize))
 }
 
 func (db *XBase) fieldByNo(fieldNo int) *field {
@@ -595,16 +540,18 @@ func (db *XBase) recCount() int64 {
 	return int64(db.header.RecCount)
 }
 
-func (db *XBase) checkFile() {
+func (db *XBase) checkFile() error {
 	if db.file == nil {
-		panic(fmt.Errorf("file not open"))
+		return fmt.Errorf("file not open")
 	}
+	return nil
 }
 
-func (db *XBase) checkFields() {
+func (db *XBase) checkFields() error {
 	if len(db.fields) == 0 {
-		panic(fmt.Errorf("file structure undefined"))
+		return fmt.Errorf("file structure undefined")
 	}
+	return nil
 }
 
 func (db *XBase) checkFieldNo(fieldNo int) {
@@ -613,22 +560,14 @@ func (db *XBase) checkFieldNo(fieldNo int) {
 	}
 }
 
-func (db *XBase) checkRecNo() {
+func (db *XBase) checkRecNo() error {
 	if db.recNo > db.recCount() {
-		panic(fmt.Errorf("file is EOF"))
+		return io.EOF
 	}
 	if db.recNo < 1 {
-		panic(fmt.Errorf("file is BOF"))
+		return io.EOF
 	}
-}
-
-func (db *XBase) wrapError(s string) {
-	if r := recover(); r != nil {
-		db.err = fmt.Errorf("xbase: %s: %w", s, r)
-		if db.isPanic {
-			panic(db.err)
-		}
-	}
+	return nil
 }
 
 func (db *XBase) wrapFieldError(s string, fieldNo int) {
@@ -645,28 +584,11 @@ func (db *XBase) wrapFieldError(s string, fieldNo int) {
 	}
 }
 
-func (db *XBase) seekRec() {
+// seekRecord move the file ptr to the record start position
+func (db *XBase) seekRecord() error {
 	offset := int64(db.header.DataOffset) + int64(db.header.RecSize)*(db.recNo-1)
-	db.fileSeek(offset, 0)
-}
-
-func (db *XBase) appendRec() {
-	db.recNo = db.recCount() + 1
-	db.seekRec()
-	db.fileWrite(db.buf)
-	db.header.RecCount++
-}
-
-func (db *XBase) writeRec() {
-	db.checkRecNo()
-	db.seekRec()
-	db.fileWrite(db.buf)
-}
-
-func (db *XBase) readRec() {
-	db.checkRecNo()
-	db.seekRec()
-	db.fileRead(db.buf)
+	_, err := db.file.Seek(offset, 0)
+	return err
 }
 
 func (db *XBase) calcRecSize() uint16 {
@@ -677,35 +599,44 @@ func (db *XBase) calcRecSize() uint16 {
 	return uint16(size)
 }
 
-func (db *XBase) writeHeader() {
-	db.fileSeek(0, 0)
-	db.header.write(db.file)
+func (db *XBase) writeHeader() error {
+	if _, err := db.file.Seek(0, 0); err != nil {
+		return err
+	}
+	return db.header.write(db.file)
 }
 
-func (db *XBase) writeFields() {
+func (db *XBase) writeFields() error {
 	offset := 1 // deleted mark
 	for _, f := range db.fields {
 		f.Offset = uint32(offset)
-		f.write(db.file)
+		if err := f.write(db.file); err != nil {
+			return err
+		}
 		offset += int(f.Len)
 	}
+	return nil
 }
 
-func (db *XBase) readFields() {
+func (db *XBase) readFields() error {
 	offset := 1 // deleted mark
 	count := db.header.fieldCount()
 	for i := 0; i < count; i++ {
 		f := &field{}
-		f.read(db.file)
+		err := f.read(db.file)
+		if err != nil {
+			return err
+		}
 		f.Offset = uint32(offset)
 		db.fields = append(db.fields, f)
 		offset += int(f.Len)
 	}
+	return nil
 }
 
 func (db *XBase) clearBuf() {
-	for i := range db.buf {
-		db.buf[i] = ' '
+	for i := range db.rawBuffer {
+		db.rawBuffer[i] = ' '
 	}
 }
 
@@ -719,55 +650,7 @@ func (db *XBase) File() (*os.File, error) {
 	return db.file, nil
 }
 
-func (db *XBase) fileCreate(name string) {
-	f, err := os.Create(name)
-	if err != nil {
-		panic(err)
-	}
-	db.file = f
-}
-
-func (db *XBase) fileOpen(name string, readOnly bool) {
-	var f *os.File
-	var err error
-
-	if readOnly {
-		f, err = os.Open(name)
-	} else {
-		f, err = os.OpenFile(name, os.O_RDWR, 0666)
-	}
-	if err != nil {
-		panic(err)
-	}
-	db.file = f
-}
-
-func (db *XBase) fileClose() {
-	db.checkFile()
-	if err := db.file.Close(); err != nil {
-		panic(err)
-	}
-}
-
-func (db *XBase) fileSeek(offset int64, whence int) {
-	db.checkFile()
-	if _, err := db.file.Seek(offset, whence); err != nil {
-		panic(err)
-	}
-}
-
-func (db *XBase) fileWrite(b []byte) {
-	db.checkFile()
-	if _, err := db.file.Write(b); err != nil {
-		panic(err)
-	}
-}
-
-func (db *XBase) fileRead(b []byte) {
-	db.checkFile()
-	if n, err := db.file.Read(b); err != nil {
-		panic(err)
-	} else if n == 1 && len(b) > 1 {
-		db.err = fmt.Errorf("file is EOF")
-	}
+func (db *XBase) fileWrite(b []byte) error {
+	_, err := db.file.Write(b)
+	return err
 }
