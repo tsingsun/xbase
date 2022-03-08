@@ -12,6 +12,8 @@ import (
 // the read record.
 var ErrFieldCount = errors.New("wrong number of fields in record")
 
+var BOF = errors.New("BOF")
+
 // An UnmarshalTypeError describes a string value that was not appropriate for
 // a value of a specific Go type.
 type UnmarshalTypeError struct {

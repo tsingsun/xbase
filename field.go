@@ -65,48 +65,58 @@ func isASCII(s string) bool {
 
 // New field
 
-func newField(name string, typ string, length, dec int) *field {
-	f := &field{}
+func newField(name string, typ string, length, dec int) (f *field, err error) {
+	f = &field{}
 	// do not change the call order
-	f.setName(name)
-	f.setType(typ)
-	f.setLen(length)
-	f.setDec(dec)
-	return f
+	if err = f.setName(name); err != nil {
+		return
+	}
+	if err = f.setType(typ); err != nil {
+		return
+	}
+	if err = f.setLen(length); err != nil {
+		return
+	}
+	if err = f.setDec(dec); err != nil {
+		return
+	}
+	return f, nil
 }
 
-func (f *field) setName(name string) {
+func (f *field) setName(name string) error {
 	name = strings.ToUpper(strings.TrimSpace(name))
 	if len(name) == 0 {
-		panic(fmt.Errorf("empty field name"))
+		return fmt.Errorf("empty field name")
 	}
 	if len(name) > maxFieldNameLen {
-		panic(fmt.Errorf("too long field name: %q, max len %d", name, maxFieldNameLen))
+		return fmt.Errorf("too long field name: %q, max len %d", name, maxFieldNameLen)
 	}
 	copy(f.Name[:], name)
+	return nil
 }
 
-func (f *field) setType(typ string) {
+func (f *field) setType(typ string) error {
 	typ = strings.ToUpper(strings.TrimSpace(typ))
 	if len(typ) == 0 {
-		panic(fmt.Errorf("empty field type"))
+		return fmt.Errorf("empty field type")
 	}
 	t := typ[0]
 	if bytes.IndexByte([]byte("CNLDF"), t) < 0 {
-		panic(fmt.Errorf("invalid field type: got %s, want C, N, L, D", string(t)))
+		return fmt.Errorf("invalid field type: got %s, want C, N, L, D", string(t))
 	}
 	f.Type = t
+	return nil
 }
 
-func (f *field) setLen(length int) {
+func (f *field) setLen(length int) error {
 	switch f.Type {
 	case 'C':
 		if length <= 0 || length > maxCFieldLen {
-			panic(fmt.Errorf("invalid field len: got %d, want 0 < len <= %d", length, maxCFieldLen))
+			return fmt.Errorf("invalid field len: got %d, want 0 < len <= %d", length, maxCFieldLen)
 		}
 	case 'N':
 		if length <= 0 || length > maxNFieldLen {
-			panic(fmt.Errorf("invalid field len: got %d, want 0 < len <= %d", length, maxNFieldLen))
+			return fmt.Errorf("invalid field len: got %d, want 0 < len <= %d", length, maxNFieldLen)
 		}
 	case 'L':
 		length = defaultLFieldLen
@@ -114,24 +124,26 @@ func (f *field) setLen(length int) {
 		length = defaultDFieldLen
 	}
 	f.Len = byte(length)
+	return nil
 }
 
-func (f *field) setDec(dec int) {
-	if f.Type == 'N' {
+func (f *field) setDec(dec int) error {
+	if f.Type == 'N' || f.Type == 'F' {
 		if dec < 0 {
-			panic(fmt.Errorf("invalid field dec: got %d, want dec > 0", dec))
+			return fmt.Errorf("invalid field dec: got %d, want dec > 0", dec)
 		}
 		length := int(f.Len)
 		if length <= 2 && dec > 0 {
-			panic(fmt.Errorf("invalid field dec: got %d, want 0", dec))
+			return fmt.Errorf("invalid field dec: got %d, want 0", dec)
 		}
 		if length > 2 && (dec > length-2) {
-			panic(fmt.Errorf("invalid field dec: got %d, want dec <= %d", dec, length-2))
+			return fmt.Errorf("invalid field dec: got %d, want dec <= %d", dec, length-2)
 		}
 	} else {
 		dec = 0
 	}
 	f.Dec = byte(dec)
+	return nil
 }
 
 // read field info from io.Reader
@@ -160,21 +172,23 @@ func (f *field) setBuffer(recordBuf []byte, value string) {
 
 // Check
 
-func (f *field) checkType(t byte) {
+func (f *field) checkType(t byte) error {
 	if t != f.Type {
-		panic(fmt.Errorf("type mismatch: got %q, want %q", string(t), string(f.Type)))
+		return fmt.Errorf("type mismatch: got %q, want %q", string(t), string(f.Type))
 	}
+	return nil
 }
 
-func (f *field) checkLen(value string) {
+func (f *field) checkLen(value string) error {
 	if len(value) > int(f.Len) {
-		panic(fmt.Errorf("field value overflow: value len %d, field len %d", len(value), int(f.Len)))
+		return fmt.Errorf("field value overflow: value len %d, field len %d", len(value), int(f.Len))
 	}
+	return nil
 }
 
 // Get value
 
-func (f *field) stringValue(recordBuf []byte, dec *encoding.Decoder) string {
+func (f *field) stringValue(recordBuf []byte, dec *encoding.Decoder) (string, error) {
 	s := string(f.buffer(recordBuf))
 
 	switch f.Type {
@@ -187,144 +201,162 @@ func (f *field) stringValue(recordBuf []byte, dec *encoding.Decoder) string {
 	if dec != nil && f.Type == 'C' && !isASCII(s) {
 		ds, err := dec.String(s)
 		if err != nil {
-			panic(err)
+			return "", err
 		}
 		s = ds
 	}
-	return s
+	return s, nil
 }
 
-func (f *field) boolValue(recordBuf []byte) bool {
-	f.checkType('L')
+func (f *field) boolValue(recordBuf []byte) (v bool, err error) {
+	if err = f.checkType('L'); err != nil {
+		return
+	}
 	fieldBuf := f.buffer(recordBuf)
 	b := fieldBuf[0]
-	return (b == 'T' || b == 't' || b == 'Y' || b == 'y')
+	v = b == 'T' || b == 't' || b == 'Y' || b == 'y'
+	return
 }
 
-func (f *field) dateValue(recordBuf []byte) time.Time {
-	f.checkType('D')
+func (f *field) dateValue(recordBuf []byte) (d time.Time, err error) {
+	if err = f.checkType('D'); err != nil {
+		return
+	}
 	s := string(f.buffer(recordBuf))
-	var d time.Time
 	if strings.Trim(s, " ") == "" {
-		return d
+		return
 	}
-	d, err := time.Parse("20060102", s)
-	if err != nil {
-		panic(err)
-	}
-	return d
+	return time.Parse("20060102", s)
 }
 
-func (f *field) intValue(recordBuf []byte) int64 {
-	f.checkType('N')
+func (f *field) intValue(recordBuf []byte) (val int64, err error) {
+	if err = f.checkType('N'); err != nil {
+		return
+	}
 	s := string(f.buffer(recordBuf))
 	s = strings.TrimSpace(s)
 	if s == "" || s[0] == '.' {
-		return 0
+		return
 	}
 	i := strings.IndexByte(s, '.')
 	if i > 0 {
 		s = s[0:i]
 	}
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err != nil {
-		panic(err)
-	}
-	return n
+	return strconv.ParseInt(s, 10, 64)
 }
 
-func (f *field) floatValue(recordBuf []byte) float64 {
-	f.checkType('F')
+func (f *field) floatValue(recordBuf []byte) (val float64, err error) {
+	if err = f.checkType('F'); err != nil {
+		return
+	}
 	s := string(f.buffer(recordBuf))
 	s = strings.TrimSpace(s)
 	if s == "" || s[0] == '.' {
-		return 0
+		return
 	}
-	n, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		panic(err)
-	}
-	return n
+	return strconv.ParseFloat(s, 64)
 }
 
 // Set value
 
-func (f *field) setStringValue(recordBuf []byte, value string, enc *encoding.Encoder) {
-	f.checkType('C')
+func (f *field) setStringValue(recordBuf []byte, value string, enc *encoding.Encoder) (err error) {
+	if err = f.checkType('C'); err != nil {
+		return
+	}
 
 	if enc != nil && !isASCII(value) {
 		s, err := enc.String(value)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		value = s
 	}
-	f.checkLen(value)
+	if err = f.checkLen(value); err != nil {
+		return
+	}
 	f.setBuffer(recordBuf, padRight(value, int(f.Len)))
+	return
 }
 
-func (f *field) setBoolValue(recordBuf []byte, value bool) {
-	f.checkType('L')
+func (f *field) setBoolValue(recordBuf []byte, value bool) (err error) {
+	if err = f.checkType('L'); err != nil {
+		return
+	}
 	s := "F"
 	if value {
 		s = "T"
 	}
 	f.setBuffer(recordBuf, s)
+	return nil
 }
 
-func (f *field) setDateValue(recordBuf []byte, value time.Time) {
-	f.checkType('D')
+func (f *field) setDateValue(recordBuf []byte, value time.Time) (err error) {
+	if err = f.checkType('D'); err != nil {
+		return
+	}
 	f.setBuffer(recordBuf, value.Format("20060102"))
+	return
 }
 
-func (f *field) setIntValue(recordBuf []byte, value int64) {
-	f.checkType('N')
+func (f *field) setIntValue(recordBuf []byte, value int64) (err error) {
+	if err = f.checkType('N'); err != nil {
+		return
+	}
 	s := strconv.FormatInt(value, 10)
 	if f.Dec > 0 {
 		s += "." + strings.Repeat("0", int(f.Dec))
 	}
-	f.checkLen(s)
+	if err = f.checkLen(s); err != nil {
+		return
+	}
 	f.setBuffer(recordBuf, padLeft(s, int(f.Len)))
+	return
 }
 
-func (f *field) setFloatValue(recordBuf []byte, value float64) {
-	f.checkType('F')
+func (f *field) setFloatValue(recordBuf []byte, value float64) (err error) {
+	if err = f.checkType('F'); err != nil {
+		return
+	}
 	s := strconv.FormatFloat(value, 'f', int(f.Dec), 64)
-	f.checkLen(s)
+	if err = f.checkLen(s); err != nil {
+		return
+	}
 	f.setBuffer(recordBuf, padLeft(s, int(f.Len)))
+	return
 }
 
-func (f *field) setValue(recordBuf []byte, value interface{}, enc *encoding.Encoder) {
+func (f *field) setValue(recordBuf []byte, value interface{}, enc *encoding.Encoder) (err error) {
 	switch v := value.(type) {
 	case string:
-		f.setStringValue(recordBuf, v, enc)
+		err = f.setStringValue(recordBuf, v, enc)
 	case bool:
-		f.setBoolValue(recordBuf, v)
+		err = f.setBoolValue(recordBuf, v)
 	case int:
-		f.setIntValue(recordBuf, int64(v))
+		err = f.setIntValue(recordBuf, int64(v))
 	case int8:
-		f.setIntValue(recordBuf, int64(v))
+		err = f.setIntValue(recordBuf, int64(v))
 	case int16:
-		f.setIntValue(recordBuf, int64(v))
+		err = f.setIntValue(recordBuf, int64(v))
 	case int32:
-		f.setIntValue(recordBuf, int64(v))
+		err = f.setIntValue(recordBuf, int64(v))
 	case int64:
-		f.setIntValue(recordBuf, int64(v))
+		err = f.setIntValue(recordBuf, int64(v))
 	case uint8:
-		f.setIntValue(recordBuf, int64(v))
+		err = f.setIntValue(recordBuf, int64(v))
 	case uint16:
-		f.setIntValue(recordBuf, int64(v))
+		err = f.setIntValue(recordBuf, int64(v))
 	case uint32:
-		f.setIntValue(recordBuf, int64(v))
+		err = f.setIntValue(recordBuf, int64(v))
 	case uint64:
-		f.setIntValue(recordBuf, int64(v))
+		err = f.setIntValue(recordBuf, int64(v))
 	case float32:
-		f.setFloatValue(recordBuf, float64(v))
+		err = f.setFloatValue(recordBuf, float64(v))
 	case float64:
-		f.setFloatValue(recordBuf, float64(v))
+		err = f.setFloatValue(recordBuf, float64(v))
 	case time.Time:
-		f.setDateValue(recordBuf, v)
+		err = f.setDateValue(recordBuf, v)
 	default:
-		panic(fmt.Errorf("unsupport type value"))
+		err = fmt.Errorf("unsupport type value")
 	}
+	return err
 }

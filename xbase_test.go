@@ -2,10 +2,9 @@ package xbase
 
 import (
 	"github.com/stretchr/testify/assert"
+	"io"
 	"io/ioutil"
 	"os"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -20,6 +19,7 @@ type test struct {
 	Date  time.Time `dbf:"DATE"`
 }
 
+// readFile clear modDate
 func readFile(name string) []byte {
 	f, err := os.Open(name)
 	if err != nil {
@@ -81,8 +81,8 @@ func TestSetFieldValueError(t *testing.T) {
 
 func TestAddFieldError(t *testing.T) {
 	db := New()
-	db.AddField("NAME", "X", 10)
-	require.Error(t, db.Error())
+	err := db.AddField("NAME", "X", 10)
+	require.Error(t, err)
 }
 
 func TestAddEmptyRec(t *testing.T) {
@@ -103,7 +103,7 @@ func TestAddEmptyRec(t *testing.T) {
 
 	testBytes := readFile("./testdata/test.dbf")
 	goldBytes := readFile("./testdata/rec1.dbf")
-	require.Equal(t, goldBytes, testBytes)
+	require.Equal(t, goldBytes[:], testBytes)
 }
 
 func TestAddRecords(t *testing.T) {
@@ -204,11 +204,9 @@ func TestReadNext(t *testing.T) {
 	require.Equal(t, "Мышь", db.FieldValueAsString(1))
 	require.Equal(t, int64(-321), db.FieldValueAsInt(3))
 
-	db.Next()
-	require.Equal(t, true, db.EOF())
+	assert.ErrorIs(t, db.Next(), io.EOF)
 
-	db.Next()
-	require.Equal(t, true, db.EOF())
+	assert.ErrorIs(t, db.Next(), io.EOF)
 
 	db.Close()
 	require.NoError(t, db.Error())
@@ -218,29 +216,27 @@ func TestReadPrev(t *testing.T) {
 	db, err := Open("./testdata/rec3.dbf", true)
 	assert.NoError(t, err)
 
-	db.Last()
+	assert.NoError(t, db.Last())
 	require.Equal(t, int64(3), db.RecNo())
 	require.Equal(t, false, db.EOF())
 	require.Equal(t, "Мышь", db.FieldValueAsString(1))
 	require.Equal(t, int64(-321), db.FieldValueAsInt(3))
 
-	db.Prev()
+	assert.NoError(t, db.Prev())
 	require.Equal(t, int64(2), db.RecNo())
 	require.Equal(t, false, db.EOF())
 	require.Equal(t, "", db.FieldValueAsString(1))
 	require.Equal(t, int64(0), db.FieldValueAsInt(3))
 
-	db.Prev()
+	assert.NoError(t, db.Prev())
 	require.Equal(t, int64(1), db.RecNo())
 	require.Equal(t, false, db.EOF())
 	require.Equal(t, "Abc", db.FieldValueAsString(1))
 	require.Equal(t, int64(123), db.FieldValueAsInt(3))
 
-	db.Prev()
-	require.Equal(t, true, db.BOF())
+	assert.Error(t, db.Prev())
 
-	db.Prev()
-	require.Equal(t, true, db.BOF())
+	assert.ErrorIs(t, db.Prev(), BOF)
 
 	db.Close()
 	require.NoError(t, db.Error())
@@ -324,56 +320,4 @@ func TestCreateEditRec(t *testing.T) {
 
 	db.Close()
 	require.NoError(t, db.Error())
-}
-
-func TestTryGoTo(t *testing.T) {
-	db := New()
-	defer db.Close()
-	db.AddField("NAME", "C", 30)
-	db.CreateFile("./testdata/test.dbf")
-	db.Add()
-	db.SetFieldValue(1, "Abc")
-	db.Save()
-	db.Flush()
-	//time.Sleep(time.Second)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	long := strings.Repeat("abc", 10)
-	go func() {
-		otdb, err := Open("./testdata/test.dbf", false)
-		assert.NoError(t, err)
-
-		otdb.Add()
-		otdb.SetFieldValue(1, long)
-		otdb.Save()
-		otdb.Flush()
-		otdb.Add()
-		otdb.SetFieldValue(1, "abc")
-		otdb.Save()
-		otdb.Flush()
-		otdb.Close()
-		wg.Done()
-	}()
-	wg.Wait()
-	if db.TryGoTo(2) {
-		require.Equal(t, long, db.FieldValueAsString(1))
-	} else {
-		t.Fatal()
-	}
-	db.GoTo(3)
-	require.Equal(t, int64(3), db.recCount())
-	db.Add()
-	db.SetFieldValue(1, "AbcAbc")
-	db.Save()
-	db.Flush()
-	if db.TryGoTo(4) {
-		require.Equal(t, "AbcAbc", db.FieldValueAsString(1))
-	} else {
-		t.Fatal()
-	}
-	db.GoTo(5)
-	if db.err == nil {
-		t.Fatal("must error")
-	}
-	require.Equal(t, int64(4), db.recCount())
 }

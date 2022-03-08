@@ -2,6 +2,7 @@ package xbase
 
 import (
 	"bytes"
+	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
 
@@ -43,7 +44,8 @@ func TestFieldSetDec(t *testing.T) {
 }
 
 func TestNewField(t *testing.T) {
-	f := newField("Price", "N", 12, 2)
+	f, err := newField("Price", "N", 12, 2)
+	assert.NoError(t, err)
 	require.Equal(t, "PRICE", f.name())
 	require.Equal(t, byte('N'), f.Type)
 	require.Equal(t, byte(12), f.Len)
@@ -95,7 +97,8 @@ func TestIsASCII(t *testing.T) {
 }
 
 func TestFieldBuffer(t *testing.T) {
-	f := newField("Log", "L", 1, 0)
+	f, err := newField("Log", "L", 1, 0)
+	assert.NoError(t, err)
 	f.Offset = 6
 	recordBuf := []byte(" Abc  T 12")
 	buf := f.buffer(recordBuf)
@@ -103,49 +106,60 @@ func TestFieldBuffer(t *testing.T) {
 }
 
 func TestFieldStringValue(t *testing.T) {
-	f := newField("Name", "C", 5, 0)
+	f, err := newField("Name", "C", 5, 0)
+	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("   Abc    ")
-	v := f.stringValue(recordBuf, nil)
+	v, err := f.stringValue(recordBuf, nil)
+	assert.NoError(t, err)
 	require.Equal(t, "Abc", v)
 }
 
 func TestFieldBoolValue(t *testing.T) {
-	f := newField("Name", "L", 1, 0)
+	f, err := newField("Name", "L", 1, 0)
+	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("   T    ")
-	v := f.boolValue(recordBuf)
+	v, err := f.boolValue(recordBuf)
+	assert.NoError(t, err)
 	require.Equal(t, true, v)
 }
 
 func TestFieldDateValue(t *testing.T) {
-	f := newField("Name", "D", 8, 0)
+	f, err := newField("Name", "D", 8, 0)
+	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("   20200923    ")
 
 	d := time.Date(2020, 9, 23, 0, 0, 0, 0, time.UTC)
-	v := f.dateValue(recordBuf)
+	v, err := f.dateValue(recordBuf)
+	assert.NoError(t, err)
 	require.Equal(t, d, v)
 }
 
 func TestFieldIntValue(t *testing.T) {
-	f := newField("Name", "N", 8, 0)
+	f, err := newField("Name", "N", 8, 0)
+	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("      -2020    ")
-	v := f.intValue(recordBuf)
+	v, err := f.intValue(recordBuf)
+	assert.NoError(t, err)
 	require.Equal(t, int64(-2020), v)
 }
 
 func TestFieldFloatValue(t *testing.T) {
-	f := newField("Name", "N", 8, 2)
+	f, err := newField("Name", "F", 8, 2)
+	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("     -20.21    ")
-	v := f.floatValue(recordBuf)
+	v, err := f.floatValue(recordBuf)
+	assert.NoError(t, err)
 	require.Equal(t, float64(-20.21), v)
 }
 
 func TestFieldSetBuffer(t *testing.T) {
-	f := newField("Log", "L", 1, 0)
+	f, err := newField("Log", "L", 1, 0)
+	assert.NoError(t, err)
 	f.Offset = 6
 	recordBuf := []byte(" Abc  T 12")
 	f.setBuffer(recordBuf, "F")
@@ -154,7 +168,8 @@ func TestFieldSetBuffer(t *testing.T) {
 
 func TestFieldSetStringValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f := newField("NAME", "C", 5, 0)
+	f, err := newField("NAME", "C", 5, 0)
+	assert.NoError(t, err)
 	f.Offset = 5
 	f.setStringValue(recordBuf, " Abc", nil)
 	require.Equal(t, []byte(" Abc "), recordBuf[5:10])
@@ -162,7 +177,8 @@ func TestFieldSetStringValue(t *testing.T) {
 
 func TestFieldSetBoolValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f := newField("NAME", "L", 1, 0)
+	f, err := newField("NAME", "L", 1, 0)
+	assert.NoError(t, err)
 	f.Offset = 5
 	f.setBoolValue(recordBuf, true)
 	require.Equal(t, []byte("T"), recordBuf[5:6])
@@ -170,7 +186,8 @@ func TestFieldSetBoolValue(t *testing.T) {
 
 func TestFieldSetDateValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f := newField("NAME", "D", 8, 0)
+	f, err := newField("NAME", "D", 8, 0)
+	assert.NoError(t, err)
 	f.Offset = 5
 	d := time.Date(2020, 9, 23, 0, 0, 0, 0, time.UTC)
 	f.setDateValue(recordBuf, d)
@@ -179,7 +196,8 @@ func TestFieldSetDateValue(t *testing.T) {
 
 func TestFieldSetIntValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f := newField("NAME", "N", 5, 0)
+	f, err := newField("NAME", "N", 5, 0)
+	assert.NoError(t, err)
 	f.Offset = 5
 	f.setIntValue(recordBuf, 123)
 	require.Equal(t, []byte("  123"), recordBuf[5:10])
@@ -187,7 +205,8 @@ func TestFieldSetIntValue(t *testing.T) {
 
 func TestFieldSetFloatValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f := newField("NAME", "N", 8, 2)
+	f, err := newField("NAME", "F", 8, 2)
+	assert.NoError(t, err)
 	f.Offset = 5
 	f.setFloatValue(recordBuf, 123.45)
 	require.Equal(t, []byte("  123.45"), recordBuf[5:13])
