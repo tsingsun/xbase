@@ -4,17 +4,16 @@ package xbase
 //
 // If there is no data left to be read, Read returns (nil, io.EOF).
 //
-// It is implemented by csv.Reader.
+// It is implemented by dbf.Reader.
 type Reader interface {
-	Header() ([]string, error)
-	ReadLine() ([]string, error)
+	Read() ([]string, error)
 }
 
 // Writer provides the interface for writing a single DBF record.
 //
-// It is implemented by csv.Writer.
+// It is implemented by dbf.Writer.
 type Writer interface {
-	Write([]string) error
+	Write([]interface{}) error
 }
 
 // Unmarshaler is the interface implemented by types that can unmarshal

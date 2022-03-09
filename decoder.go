@@ -8,7 +8,7 @@ import (
 
 type decField struct {
 	columnIndex int
-	cacheField
+	fieldDescription
 	decodeFunc
 	zero interface{}
 }
@@ -68,28 +68,28 @@ type Decoder struct {
 //
 // NewDecoder may return io.EOF if there is no data in r and no header was
 // provided by the caller.
-func NewDecoder(r Reader, header ...string) (dec *Decoder, err error) {
-	if len(header) == 0 {
-		header, err = r.Header()
+func NewDecoder(r Reader, fields ...string) (dec *Decoder, err error) {
+	if len(fields) == 0 {
+		fields, err = r.Read()
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	h := make([]string, len(header))
-	copy(h, header)
-	header = h
+	h := make([]string, len(fields))
+	copy(h, fields)
+	fields = h
 
-	m := make(map[string]int, len(header))
-	for i, h := range header {
+	m := make(map[string]int, len(fields))
+	for i, h := range fields {
 		m[h] = i
 	}
 
 	return &Decoder{
 		r:      r,
-		header: header,
+		header: fields,
 		hmap:   m,
-		unused: make([]int, 0, len(header)),
+		unused: make([]int, 0, len(fields)),
 	}, nil
 }
 
@@ -344,7 +344,7 @@ func (d *Decoder) decodeArray(v reflect.Value) error {
 }
 
 func (d *Decoder) decodeStruct(v reflect.Value) (err error) {
-	d.record, err = d.r.ReadLine()
+	d.record, err = d.r.Read()
 	if err != nil {
 		return err
 	}
@@ -472,9 +472,9 @@ func (d *Decoder) fields(k typeKey) ([]decField, error) {
 		}
 
 		df := decField{
-			columnIndex: i,
-			cacheField:  f,
-			decodeFunc:  fn,
+			columnIndex:      i,
+			fieldDescription: f,
+			decodeFunc:       fn,
 		}
 
 		if d.Map != nil {

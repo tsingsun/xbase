@@ -44,7 +44,7 @@ func TestFieldSetDec(t *testing.T) {
 }
 
 func TestNewField(t *testing.T) {
-	f, err := newField("Price", "N", 12, 2)
+	f, err := NewField("Price", "N", 12, 2)
 	assert.NoError(t, err)
 	require.Equal(t, "PRICE", f.name())
 	require.Equal(t, byte('N'), f.Type)
@@ -97,7 +97,7 @@ func TestIsASCII(t *testing.T) {
 }
 
 func TestFieldBuffer(t *testing.T) {
-	f, err := newField("Log", "L", 1, 0)
+	f, err := NewField("Log", "L", 1, 0)
 	assert.NoError(t, err)
 	f.Offset = 6
 	recordBuf := []byte(" Abc  T 12")
@@ -106,7 +106,7 @@ func TestFieldBuffer(t *testing.T) {
 }
 
 func TestFieldStringValue(t *testing.T) {
-	f, err := newField("Name", "C", 5, 0)
+	f, err := NewField("Name", "C", 5, 0)
 	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("   Abc    ")
@@ -116,7 +116,7 @@ func TestFieldStringValue(t *testing.T) {
 }
 
 func TestFieldBoolValue(t *testing.T) {
-	f, err := newField("Name", "L", 1, 0)
+	f, err := NewField("Name", "L", 1, 0)
 	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("   T    ")
@@ -126,7 +126,7 @@ func TestFieldBoolValue(t *testing.T) {
 }
 
 func TestFieldDateValue(t *testing.T) {
-	f, err := newField("Name", "D", 8, 0)
+	f, err := NewField("Name", "D", 8, 0)
 	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("   20200923    ")
@@ -138,7 +138,7 @@ func TestFieldDateValue(t *testing.T) {
 }
 
 func TestFieldIntValue(t *testing.T) {
-	f, err := newField("Name", "N", 8, 0)
+	f, err := NewField("Name", "N", 8, 0)
 	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("      -2020    ")
@@ -148,7 +148,7 @@ func TestFieldIntValue(t *testing.T) {
 }
 
 func TestFieldFloatValue(t *testing.T) {
-	f, err := newField("Name", "F", 8, 2)
+	f, err := NewField("Name", "F", 8, 2)
 	assert.NoError(t, err)
 	f.Offset = 3
 	recordBuf := []byte("     -20.21    ")
@@ -158,7 +158,7 @@ func TestFieldFloatValue(t *testing.T) {
 }
 
 func TestFieldSetBuffer(t *testing.T) {
-	f, err := newField("Log", "L", 1, 0)
+	f, err := NewField("Log", "L", 1, 0)
 	assert.NoError(t, err)
 	f.Offset = 6
 	recordBuf := []byte(" Abc  T 12")
@@ -168,7 +168,7 @@ func TestFieldSetBuffer(t *testing.T) {
 
 func TestFieldSetStringValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f, err := newField("NAME", "C", 5, 0)
+	f, err := NewField("NAME", "C", 5, 0)
 	assert.NoError(t, err)
 	f.Offset = 5
 	f.setStringValue(recordBuf, " Abc", nil)
@@ -177,7 +177,7 @@ func TestFieldSetStringValue(t *testing.T) {
 
 func TestFieldSetBoolValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f, err := newField("NAME", "L", 1, 0)
+	f, err := NewField("NAME", "L", 1, 0)
 	assert.NoError(t, err)
 	f.Offset = 5
 	f.setBoolValue(recordBuf, true)
@@ -186,7 +186,7 @@ func TestFieldSetBoolValue(t *testing.T) {
 
 func TestFieldSetDateValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f, err := newField("NAME", "D", 8, 0)
+	f, err := NewField("NAME", "D", 8, 0)
 	assert.NoError(t, err)
 	f.Offset = 5
 	d := time.Date(2020, 9, 23, 0, 0, 0, 0, time.UTC)
@@ -196,7 +196,7 @@ func TestFieldSetDateValue(t *testing.T) {
 
 func TestFieldSetIntValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f, err := newField("NAME", "N", 5, 0)
+	f, err := NewField("NAME", "N", 5, 0)
 	assert.NoError(t, err)
 	f.Offset = 5
 	f.setIntValue(recordBuf, 123)
@@ -205,7 +205,7 @@ func TestFieldSetIntValue(t *testing.T) {
 
 func TestFieldSetFloatValue(t *testing.T) {
 	recordBuf := make([]byte, 20)
-	f, err := newField("NAME", "F", 8, 2)
+	f, err := NewField("NAME", "F", 8, 2)
 	assert.NoError(t, err)
 	f.Offset = 5
 	f.setFloatValue(recordBuf, 123.45)

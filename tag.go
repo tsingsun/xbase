@@ -2,16 +2,20 @@ package xbase
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 )
 
 type tag struct {
 	name      string
 	prefix    string
-	empty     bool
-	omitEmpty bool
+	empty     bool // not support
+	omitEmpty bool // not support
 	ignore    bool
 	inline    bool
+	dbfType   string
+	length    int //field length
+	decimal   int //decimal count
 }
 
 func parseTag(tagname string, field reflect.StructField) (t tag) {
@@ -31,9 +35,9 @@ func parseTag(tagname string, field reflect.StructField) (t tag) {
 	default:
 		t.name = tags[0]
 	}
-
 	for _, tagOpt := range tags[1:] {
-		switch tagOpt {
+		opts := strings.Split(tagOpt, ":")
+		switch opts[0] {
 		case "omitempty":
 			t.omitEmpty = true
 		case "inline":
@@ -41,6 +45,25 @@ func parseTag(tagname string, field reflect.StructField) (t tag) {
 				t.inline = true
 				t.prefix = tags[0]
 			}
+		case "len":
+			t.length, _ = strconv.Atoi(opts[1])
+		case "dec":
+			t.decimal, _ = strconv.Atoi(opts[1])
+		case "type":
+			//only 1 byte
+			t.dbfType = string(opts[1][0])
+		}
+	}
+	if t.dbfType == "" {
+		switch field.Type.Kind() {
+		case reflect.String:
+			t.dbfType = string(FieldType_Character)
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			t.dbfType = string(FieldType_Numeric)
+		case reflect.Float32, reflect.Float64:
+			t.dbfType = string(FieldType_Float)
+		case reflect.Bool:
+			t.dbfType = string(FieldType_Logical)
 		}
 	}
 	return

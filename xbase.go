@@ -1,6 +1,7 @@
 package xbase
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"golang.org/x/text/encoding"
-	"golang.org/x/text/encoding/charmap"
 )
 
 const (
@@ -40,79 +40,18 @@ type XBase struct {
 	isMod   bool
 	encoder *encoding.Encoder
 	decoder *encoding.Decoder
-}
-
-type cPage struct {
-	code byte
-	page int
-	cm   *charmap.Charmap
-}
-
-var cPages = []cPage{
-	{code: 0x01, page: 437, cm: charmap.CodePage437},  // US MS-DOS
-	{code: 0x02, page: 850, cm: charmap.CodePage850},  // International MS-DOS
-	{code: 0x03, page: 1252, cm: charmap.Windows1252}, // Windows ANSI
-	{code: 0x04, page: 10000, cm: charmap.Macintosh},  // Standard Macintosh
-	{code: 0x64, page: 852, cm: charmap.CodePage852},  // Easern European MS-DOS
-	{code: 0x65, page: 866, cm: charmap.CodePage866},  // Russian MS-DOS
-	{code: 0x66, page: 865, cm: charmap.CodePage865},  // Nordic MS-DOS
-
-	// Not found in package charmap
-	// 0x67	Codepage 861 Icelandic MS-DOS
-	// 0x68	Codepage 895 Kamenicky (Czech) MS-DOS
-	// 0x69	Codepage 620 Mazovia (Polish) MS-DOS
-	// 0x6A	Codepage 737 Greek MS-DOS (437G)
-	// 0x6B	Codepage 857 Turkish MS-DOS
-	// 0x78	Codepage 950 Chinese (Hong Kong SAR, Taiwan) Windows
-	// 0x79	Codepage 949 Korean Windows
-	// 0x7A	Codepage 936 Chinese (PRC, Singapore) Windows
-	// 0x7B	Codepage 932 Japanese Windows
-	// 0x7C	Codepage 874 Thai Windows
-
-	{code: 0x7D, page: 1255, cm: charmap.Windows1255},        // Hebrew Windows
-	{code: 0x7E, page: 1256, cm: charmap.Windows1256},        // Arabic Windows
-	{code: 0x96, page: 10007, cm: charmap.MacintoshCyrillic}, // Russian MacIntosh
-
-	// Not found in package charmap
-	// 0x97	Codepage 10029 MacIntosh EE
-	// 0x98	Codepage 10006 Greek MacIntosh
-
-	{code: 0xC8, page: 1250, cm: charmap.Windows1250}, // Eastern European Windows
-	{code: 0xC9, page: 1251, cm: charmap.Windows1251}, // Russian Windows
-	{code: 0xCA, page: 1254, cm: charmap.Windows1254}, // Turkish Windows
-	{code: 0xCB, page: 1253, cm: charmap.Windows1253}, // Greek Windows
-}
-
-func charMapByPage(page int) *charmap.Charmap {
-	for i := range cPages {
-		if cPages[i].page == page {
-			return cPages[i].cm
-		}
-	}
-	return nil
-}
-
-func codeByPage(page int) byte {
-	for i := range cPages {
-		if cPages[i].page == page {
-			return cPages[i].code
-		}
-	}
-	return 0
-}
-
-func pageByCode(code byte) int {
-	for i := range cPages {
-		if cPages[i].code == code {
-			return cPages[i].page
-		}
-	}
-	return 0
+	// 0: noop; 1: head; 2: field; 3:record
+	readStep int
+	// 0: noop; 1: head; 2: field; 3:record
+	writeStep int
 }
 
 // New creates a XBase object to work with a DBF file.
-func New() *XBase {
-	return &XBase{header: newHeader()}
+func New(seeker io.ReadWriteSeeker) *XBase {
+	return &XBase{
+		header: newHeader(),
+		rws:    seeker,
+	}
 }
 
 // CreateFile creates a new file in DBF format.
@@ -124,15 +63,10 @@ func (db *XBase) CreateFile(name string) (err error) {
 	if db.rws, err = os.Create(name); err != nil {
 		return
 	}
-	db.header.setFieldCount(len(db.fields))
-	db.header.RecSize = db.calcRecSize()
 	if err = db.writeHeader(); err != nil {
 		return
 	}
 	if err = db.writeFields(); err != nil {
-		return
-	}
-	if err = db.fileWrite([]byte{headerEnd}); err != nil {
 		return
 	}
 	db.makeBuf()
@@ -142,12 +76,13 @@ func (db *XBase) CreateFile(name string) (err error) {
 
 // Open opens an existing DBF file.
 func Open(name string, readOnly bool) (db *XBase, err error) {
-	db = New()
+	var f *os.File
 	if readOnly {
-		db.rws, err = os.Open(name)
+		f, err = os.Open(name)
 	} else {
-		db.rws, err = os.OpenFile(name, os.O_RDWR, 0666)
+		f, err = os.OpenFile(name, os.O_RDWR, 0666)
 	}
+	db = New(f)
 	if err != nil {
 		return
 	}
@@ -156,7 +91,7 @@ func Open(name string, readOnly bool) (db *XBase, err error) {
 		return nil, err
 	}
 
-	if err = db.readFields(); err != nil {
+	if err = db.readFields(db.rws); err != nil {
 		return nil, err
 	}
 	db.makeBuf()
@@ -226,28 +161,88 @@ func (db *XBase) BOF() bool {
 	return db.recordNum == 0 || db.recCount() == 0
 }
 
-func (db *XBase) Header() ([]string, error) {
+func (db *XBase) Fields() []string {
 	var hl []string
 	for _, f := range db.fields {
 		hl = append(hl, f.name())
 	}
-	return hl, nil
+	return hl
 }
 
-// ReadLine returns buffer string value
-func (db *XBase) ReadLine() ([]string, error) {
+// Read() implement Reader
+func (db *XBase) Read() (val []string, err error) {
+	if db.recordNum != 0 {
+		// if has move record ptr
+		db.readStep = 2
+	}
+	switch db.readStep {
+	case 0:
+		//跳过header
+		val = db.Fields()
+		db.readStep = 2
+	case 2:
+		val, err = db.readRecord()
+		return
+	}
+	return
+}
+
+// readRecord returns buffer string value
+func (db *XBase) readRecord() (val []string, err error) {
 	if db.err != nil {
 		return nil, db.err
 	}
 	var buffer = make([]byte, len(db.buffer))
 	copy(buffer, db.buffer)
-	var sl []string
 	for _, f := range db.fields {
 		s := strings.TrimSpace(string(f.buffer(buffer)))
-		sl = append(sl, s)
+		val = append(val, s)
 	}
-	db.Next()
-	return sl, db.err
+	err = db.Next()
+	return
+}
+
+func (db *XBase) Write(input []interface{}) (err error) {
+	if db.recordNum != 0 {
+		// if has move record ptr
+		db.writeStep = 2
+	}
+	switch db.writeStep {
+	case 0:
+		count := input[0].(int)
+		if err != nil {
+			return err
+		}
+		db.header.setFieldCount(count)
+		rd := bytes.NewBuffer(input[1].([]byte))
+		if err = db.readFields(rd); err != nil {
+			return err
+		}
+		if err = db.writeHeader(); err != nil {
+			return err
+		}
+		if err = db.writeFields(); err != nil {
+			return err
+		}
+		db.makeBuf()
+		db.writeStep = 2
+	case 2:
+		if err := db.Add(); err != nil {
+			return err
+		}
+		for i, value := range input {
+			if err = db.fields[i].setValue(db.buffer, value, db.encoder); err != nil {
+				return err
+			}
+		}
+		db.err = db.Save()
+		if db.err != nil {
+			return db.err
+		}
+
+		return db.Flush()
+	}
+	return nil
 }
 
 // FieldValueAsString returns the string value of the field of the current record.
@@ -355,7 +350,7 @@ func (db *XBase) Save() error {
 	if db.err != nil {
 		return db.err
 	}
-
+	// ignore to write header
 	if db.isAdd {
 		if err := db.seekRecord(db.recCount() + 1); err != nil {
 			return err
@@ -399,9 +394,10 @@ func (db *XBase) Recall() {
 	db.buffer[0] = ' '
 }
 
-// Clear zeroes the field values ​​of the current record.
+// Clear zeroes the field values ​​of the current record and error.
 func (db *XBase) Clear() {
 	db.clearBuf()
+	db.err = nil
 }
 
 // RecCount returns the number of records in the DBF file.
@@ -449,7 +445,7 @@ func (db *XBase) AddField(name string, typ string, opts ...int) error {
 	if len(opts) > 1 {
 		dec = opts[1]
 	}
-	f, err := newField(name, typ, length, dec)
+	f, err := NewField(name, typ, length, dec)
 	if err != nil {
 		return err
 	}
@@ -609,12 +605,19 @@ func (db *XBase) calcRecSize() uint16 {
 }
 
 func (db *XBase) writeHeader() error {
+	if db.header.DataOffset == 0 {
+		db.header.setFieldCount(len(db.fields))
+	}
+	if db.header.RecSize == 0 {
+		db.header.RecSize = db.calcRecSize()
+	}
 	if _, err := db.rws.Seek(0, 0); err != nil {
 		return err
 	}
 	return db.header.write(db.rws)
 }
 
+// writeFields write the field description
 func (db *XBase) writeFields() error {
 	offset := 1 // deleted mark
 	for _, f := range db.fields {
@@ -624,15 +627,18 @@ func (db *XBase) writeFields() error {
 		}
 		offset += int(f.Len)
 	}
+	if err := db.fileWrite([]byte{headerEnd}); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (db *XBase) readFields() error {
+func (db *XBase) readFields(reader io.Reader) error {
 	offset := 1 // deleted mark
 	count := db.header.fieldCount()
 	for i := 0; i < count; i++ {
 		f := &field{}
-		err := f.read(db.rws)
+		err := f.read(reader)
 		if err != nil {
 			return err
 		}

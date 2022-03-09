@@ -9,7 +9,7 @@ import (
 
 var (
 	textUnmarshaler = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
-	csvUnmarshaler  = reflect.TypeOf((*Unmarshaler)(nil)).Elem()
+	dbfUnmarshaler  = reflect.TypeOf((*Unmarshaler)(nil)).Elem()
 )
 
 var intDecoders = map[int]decodeFunc{
@@ -167,7 +167,7 @@ func decodeInterface(funcMap map[reflect.Type]reflect.Value, ifaceFuncs []reflec
 						return decodeFuncValue(f)(s, el)
 					}
 				}
-				if typ.Implements(csvUnmarshaler) {
+				if typ.Implements(dbfUnmarshaler) {
 					return decodeFieldUnmarshaler(s, el)
 				}
 				if typ.Implements(textUnmarshaler) {
@@ -213,7 +213,7 @@ func decodeFn(typ reflect.Type, funcMap map[reflect.Type]reflect.Value, ifaceFun
 		}
 	}
 
-	if reflect.PtrTo(typ).Implements(csvUnmarshaler) {
+	if reflect.PtrTo(typ).Implements(dbfUnmarshaler) {
 		return decodePtrFieldUnmarshaler, nil
 	}
 	if reflect.PtrTo(typ).Implements(textUnmarshaler) {

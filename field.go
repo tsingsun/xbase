@@ -24,6 +24,24 @@ const (
 	defaultDFieldLen = 8
 )
 
+// https://www.dbase.com/Knowledgebase/INT/db7_file_fmt.htm
+// http://www.dbase.com/help/Design_Tables/IDH_TABLEDES_FIELD_TYPES.htm
+const (
+	FieldType_Character = 'C'
+	FieldType_Numeric   = 'N'
+	FieldType_Date      = 'D'
+	FieldType_Float     = 'F'
+	FieldType_Logical   = 'L'
+	// not support
+	FieldType_Binary        = 'B'
+	FieldType_Memo          = 'M'
+	FieldType_Timestamp     = '@'
+	FieldType_Long          = 'I'
+	FieldType_Double        = 'O'
+	FieldType_OLE           = 'G'
+	FieldType_Autoincrement = '+'
+)
+
 type field struct {
 	Name   [11]byte
 	Type   byte
@@ -63,9 +81,8 @@ func isASCII(s string) bool {
 	return true
 }
 
-// New field
-
-func newField(name string, typ string, length, dec int) (f *field, err error) {
+// NewField return dbf field description
+func NewField(name string, typ string, length, dec int) (f *field, err error) {
 	f = &field{}
 	// do not change the call order
 	if err = f.setName(name); err != nil {
@@ -110,17 +127,17 @@ func (f *field) setType(typ string) error {
 
 func (f *field) setLen(length int) error {
 	switch f.Type {
-	case 'C':
+	case FieldType_Character:
 		if length <= 0 || length > maxCFieldLen {
 			return fmt.Errorf("invalid field len: got %d, want 0 < len <= %d", length, maxCFieldLen)
 		}
-	case 'N':
+	case FieldType_Numeric, FieldType_Float:
 		if length <= 0 || length > maxNFieldLen {
 			return fmt.Errorf("invalid field len: got %d, want 0 < len <= %d", length, maxNFieldLen)
 		}
-	case 'L':
+	case FieldType_Logical:
 		length = defaultLFieldLen
-	case 'D':
+	case FieldType_Date:
 		length = defaultDFieldLen
 	}
 	f.Len = byte(length)
@@ -128,7 +145,7 @@ func (f *field) setLen(length int) error {
 }
 
 func (f *field) setDec(dec int) error {
-	if f.Type == 'N' || f.Type == 'F' {
+	if f.Type == FieldType_Numeric || f.Type == FieldType_Float {
 		if dec < 0 {
 			return fmt.Errorf("invalid field dec: got %d, want dec > 0", dec)
 		}
@@ -192,13 +209,13 @@ func (f *field) stringValue(recordBuf []byte, dec *encoding.Decoder) (string, er
 	s := string(f.buffer(recordBuf))
 
 	switch f.Type {
-	case 'C':
+	case FieldType_Character:
 		s = strings.TrimRight(s, " ")
-	case 'N':
+	case FieldType_Numeric, FieldType_Float:
 		s = strings.TrimLeft(s, " ")
 	}
 
-	if dec != nil && f.Type == 'C' && !isASCII(s) {
+	if dec != nil && f.Type == FieldType_Character && !isASCII(s) {
 		ds, err := dec.String(s)
 		if err != nil {
 			return "", err
@@ -209,7 +226,7 @@ func (f *field) stringValue(recordBuf []byte, dec *encoding.Decoder) (string, er
 }
 
 func (f *field) boolValue(recordBuf []byte) (v bool, err error) {
-	if err = f.checkType('L'); err != nil {
+	if err = f.checkType(FieldType_Logical); err != nil {
 		return
 	}
 	fieldBuf := f.buffer(recordBuf)
@@ -219,7 +236,7 @@ func (f *field) boolValue(recordBuf []byte) (v bool, err error) {
 }
 
 func (f *field) dateValue(recordBuf []byte) (d time.Time, err error) {
-	if err = f.checkType('D'); err != nil {
+	if err = f.checkType(FieldType_Date); err != nil {
 		return
 	}
 	s := string(f.buffer(recordBuf))
@@ -230,7 +247,7 @@ func (f *field) dateValue(recordBuf []byte) (d time.Time, err error) {
 }
 
 func (f *field) intValue(recordBuf []byte) (val int64, err error) {
-	if err = f.checkType('N'); err != nil {
+	if err = f.checkType(FieldType_Numeric); err != nil {
 		return
 	}
 	s := string(f.buffer(recordBuf))
@@ -246,7 +263,7 @@ func (f *field) intValue(recordBuf []byte) (val int64, err error) {
 }
 
 func (f *field) floatValue(recordBuf []byte) (val float64, err error) {
-	if err = f.checkType('F'); err != nil {
+	if err = f.checkType(FieldType_Float); err != nil {
 		return
 	}
 	s := string(f.buffer(recordBuf))
@@ -260,7 +277,7 @@ func (f *field) floatValue(recordBuf []byte) (val float64, err error) {
 // Set value
 
 func (f *field) setStringValue(recordBuf []byte, value string, enc *encoding.Encoder) (err error) {
-	if err = f.checkType('C'); err != nil {
+	if err = f.checkType(FieldType_Character); err != nil {
 		return
 	}
 
@@ -279,7 +296,7 @@ func (f *field) setStringValue(recordBuf []byte, value string, enc *encoding.Enc
 }
 
 func (f *field) setBoolValue(recordBuf []byte, value bool) (err error) {
-	if err = f.checkType('L'); err != nil {
+	if err = f.checkType(FieldType_Logical); err != nil {
 		return
 	}
 	s := "F"
@@ -291,7 +308,7 @@ func (f *field) setBoolValue(recordBuf []byte, value bool) (err error) {
 }
 
 func (f *field) setDateValue(recordBuf []byte, value time.Time) (err error) {
-	if err = f.checkType('D'); err != nil {
+	if err = f.checkType(FieldType_Date); err != nil {
 		return
 	}
 	f.setBuffer(recordBuf, value.Format("20060102"))
@@ -299,7 +316,7 @@ func (f *field) setDateValue(recordBuf []byte, value time.Time) (err error) {
 }
 
 func (f *field) setIntValue(recordBuf []byte, value int64) (err error) {
-	if err = f.checkType('N'); err != nil {
+	if err = f.checkType(FieldType_Numeric); err != nil {
 		return
 	}
 	s := strconv.FormatInt(value, 10)
@@ -314,7 +331,7 @@ func (f *field) setIntValue(recordBuf []byte, value int64) (err error) {
 }
 
 func (f *field) setFloatValue(recordBuf []byte, value float64) (err error) {
-	if err = f.checkType('F'); err != nil {
+	if err = f.checkType(FieldType_Float); err != nil {
 		return
 	}
 	s := strconv.FormatFloat(value, 'f', int(f.Dec), 64)
@@ -340,6 +357,8 @@ func (f *field) setValue(recordBuf []byte, value interface{}, enc *encoding.Enco
 	case int32:
 		err = f.setIntValue(recordBuf, int64(v))
 	case int64:
+		err = f.setIntValue(recordBuf, int64(v))
+	case uint:
 		err = f.setIntValue(recordBuf, int64(v))
 	case uint8:
 		err = f.setIntValue(recordBuf, int64(v))

@@ -12,6 +12,52 @@ var (
 	_error = reflect.TypeOf((*error)(nil)).Elem()
 )
 
+// Marshal returns the CSV encoding of slice or array v. If v is not a slice or
+// elements are not structs then Marshal returns InvalidMarshalError.
+//
+// Marshal uses the std encoding/csv.Writer with its default settings for csv
+// encoding.
+//
+// Marshal will always encode the CSV header even for the empty slice.
+//
+// For the exact encoding rules look at Encoder.Encode method.
+func Marshal(v interface{}) ([]byte, error) {
+	val := walkValue(reflect.ValueOf(v))
+
+	if !val.IsValid() {
+		return nil, &InvalidMarshalError{}
+	}
+
+	switch val.Kind() {
+	case reflect.Array, reflect.Slice:
+	default:
+		return nil, &InvalidMarshalError{Type: reflect.ValueOf(v).Type()}
+	}
+
+	typ := walkType(val.Type().Elem())
+	if typ.Kind() != reflect.Struct {
+		return nil, &InvalidMarshalError{Type: reflect.ValueOf(v).Type()}
+	}
+
+	var buf bytes.Buffer
+	w := New(nil)
+	enc := NewEncoder(w)
+
+	if err := enc.encodeHeader(typ); err != nil {
+		return nil, err
+	}
+
+	if err := enc.encodeArray(val); err != nil {
+		return nil, err
+	}
+
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func countRecords(s []byte) (n int) {
 	var prev byte
 	inQuote := false
@@ -39,7 +85,7 @@ func countRecords(s []byte) (n int) {
 	}
 }
 
-// Header scans the provided struct type and generates a CSV header for it.
+// Header scans the provided struct type and generates a DBF header for it.
 //
 // Field names are written in the same order as struct fields are defined.
 // Embedded struct's fields are treated as if they were part of the outer struct.
@@ -58,7 +104,7 @@ func countRecords(s []byte) (n int) {
 // for calling it is init function. Look at Decoder.DecodingDataWithNoHeader
 // example.
 //
-// If tag is left empty the default "csv" will be used.
+// If tag is left empty the default "dbf" will be used.
 //
 // Header will return UnsupportedTypeError if the provided value is nil or is
 // not a struct.

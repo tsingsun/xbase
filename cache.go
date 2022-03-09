@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-type cacheField struct {
+type fieldDescription struct {
 	name     string
 	baseType reflect.Type
 	typ      reflect.Type
@@ -14,13 +14,13 @@ type cacheField struct {
 	index    []int
 }
 
-type fields []cacheField
+type fieldDescriptions []fieldDescription
 
-func (fs fields) Len() int { return len(fs) }
+func (fs fieldDescriptions) Len() int { return len(fs) }
 
-func (fs fields) Swap(i, j int) { fs[i], fs[j] = fs[j], fs[i] }
+func (fs fieldDescriptions) Swap(i, j int) { fs[i], fs[j] = fs[j], fs[i] }
 
-func (fs fields) Less(i, j int) bool {
+func (fs fieldDescriptions) Less(i, j int) bool {
 	for k, n := range fs[i].index {
 		if n != fs[j].index[k] {
 			return n < fs[j].index[k]
@@ -34,9 +34,9 @@ type typeKey struct {
 	reflect.Type
 }
 
-type fieldMap map[string]fields
+type fieldMap map[string]fieldDescriptions
 
-func (m fieldMap) insert(f cacheField) {
+func (m fieldMap) insert(f fieldDescription) {
 	fs, ok := m[f.name]
 	if !ok {
 		m[f.name] = append(fs, f)
@@ -50,15 +50,15 @@ func (m fieldMap) insert(f cacheField) {
 
 	// fields that are tagged have priority.
 	if !f.tag.empty {
-		m[f.name] = append([]cacheField{f}, fs...)
+		m[f.name] = append([]fieldDescription{f}, fs...)
 		return
 	}
 
 	m[f.name] = append(fs, f)
 }
 
-func (m fieldMap) fields() fields {
-	out := make(fields, 0, len(m))
+func (m fieldMap) fields() fieldDescriptions {
+	out := make(fieldDescriptions, 0, len(m))
 	for _, v := range m {
 		for i, f := range v {
 			if f.tag.empty != v[0].tag.empty {
@@ -75,13 +75,13 @@ func (m fieldMap) fields() fields {
 	return out
 }
 
-func buildFields(k typeKey) fields {
+func buildFields(k typeKey) fieldDescriptions {
 	type key struct {
 		reflect.Type
 		tag
 	}
 
-	q := fields{{typ: k.Type}}
+	q := fieldDescriptions{{typ: k.Type}}
 	visited := make(map[key]struct{})
 	fm := make(fieldMap)
 
@@ -130,7 +130,7 @@ func buildFields(k typeKey) fields {
 				ft = ft.Elem()
 			}
 
-			newf := cacheField{
+			newf := fieldDescription{
 				name:     tag.prefix + tag.name,
 				baseType: sf.Type,
 				typ:      ft,
@@ -158,7 +158,7 @@ func buildFields(k typeKey) fields {
 				}
 				if v.typ == f.typ && v.tag.prefix == tag.prefix {
 					// other nodes can have different path.
-					fm.insert(cacheField{
+					fm.insert(fieldDescription{
 						name:     tag.prefix + tag.name,
 						baseType: sf.Type,
 						typ:      ft,
@@ -180,10 +180,10 @@ func makeIndex(index []int, v int) []int {
 
 var fieldCache = struct {
 	mtx sync.RWMutex
-	m   map[typeKey][]cacheField
-}{m: make(map[typeKey][]cacheField)}
+	m   map[typeKey][]fieldDescription
+}{m: make(map[typeKey][]fieldDescription)}
 
-func cachedFields(k typeKey) fields {
+func cachedFields(k typeKey) fieldDescriptions {
 	fieldCache.mtx.RLock()
 	fields, ok := fieldCache.m[k]
 	fieldCache.mtx.RUnlock()

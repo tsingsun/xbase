@@ -11,12 +11,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type test struct {
-	Name  string    `dbf:"NAME"`
-	Flag  bool      `dbf:"FLAG"`
-	Count int       `dbf:"COUNT"`
-	Price float64   `dbf:"PRICE"`
-	Date  time.Time `dbf:"DATE"`
+type Rec struct {
+	Name  string    `dbf:"NAME,type:C,len:20"`
+	Flag  bool      `dbf:"FLAG,type:L"`
+	Count int       `dbf:"COUNT,type:N,len:5"`
+	Price float64   `dbf:"PRICE,type:F,len:9,dec:2"`
+	Date  time.Time `dbf:"DATE,type:D"`
 }
 
 // readFile clear modDate
@@ -50,7 +50,7 @@ func addFields(db *XBase) {
 }
 
 func TestCreateEmptyFile(t *testing.T) {
-	db := New()
+	db := New(nil)
 	addFields(db)
 	db.CreateFile("./testdata/test.dbf")
 
@@ -80,13 +80,13 @@ func TestSetFieldValueError(t *testing.T) {
 }
 
 func TestAddFieldError(t *testing.T) {
-	db := New()
+	db := New(nil)
 	err := db.AddField("NAME", "X", 10)
 	require.Error(t, err)
 }
 
 func TestAddEmptyRec(t *testing.T) {
-	db := New()
+	db := New(nil)
 	addFields(db)
 	db.CreateFile("./testdata/test.dbf")
 
@@ -107,7 +107,7 @@ func TestAddEmptyRec(t *testing.T) {
 }
 
 func TestAddRecords(t *testing.T) {
-	db := New()
+	db := New(nil)
 	addFields(db)
 	db.CreateFile("./testdata/test.dbf")
 
@@ -292,7 +292,7 @@ func TestOpenAddRec(t *testing.T) {
 }
 
 func TestCreateEditRec(t *testing.T) {
-	db := New()
+	db := New(nil)
 	db.AddField("NAME", "C", 3)
 	db.CreateFile("./testdata/test.dbf")
 

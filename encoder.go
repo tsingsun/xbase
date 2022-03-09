@@ -1,6 +1,7 @@
 package xbase
 
 import (
+	"bytes"
 	"reflect"
 	"sort"
 )
@@ -8,7 +9,8 @@ import (
 const defaultBufSize = 4096
 
 type encField struct {
-	cacheField
+	fieldDescription
+	field *field
 	encodeFunc
 }
 
@@ -35,15 +37,19 @@ func newEncCache(k typeKey, funcMap map[reflect.Type]reflect.Value, funcs []refl
 			continue
 		}
 		set[f.name] = true
-
+		fm, err := NewField(f.name, f.tag.dbfType, f.tag.length, f.tag.decimal)
+		if err != nil {
+			return nil, err
+		}
 		fn, err := encodeFn(f.baseType, true, funcMap, funcs)
 		if err != nil {
 			return nil, err
 		}
 
 		encFields = append(encFields, encField{
-			cacheField: f,
-			encodeFunc: fn,
+			field:            fm,
+			fieldDescription: f,
+			encodeFunc:       fn,
 		})
 	}
 
@@ -56,7 +62,7 @@ func newEncCache(k typeKey, funcMap map[reflect.Type]reflect.Value, funcs []refl
 				continue
 			}
 			encFields = append(encFields, encField{
-				cacheField: cacheField{
+				fieldDescription: fieldDescription{
 					name: k,
 				},
 				encodeFunc: nopEncode,
@@ -315,16 +321,24 @@ func (e *Encoder) encodeArray(v reflect.Value) error {
 }
 
 func (e *Encoder) encodeHeader(typ reflect.Type) error {
-	fields, _, _, record, err := e.cache(typ)
+	fields, _, _, _, err := e.cache(typ)
 	if err != nil {
 		return err
 	}
 
-	for i, f := range fields {
-		record[i] = f.name
+	var bf = new(bytes.Buffer)
+	for _, f := range fields {
+		fm, err := NewField(f.name, f.fieldDescription.tag.dbfType, f.fieldDescription.tag.length, f.fieldDescription.tag.decimal)
+		if err != nil {
+			return err
+		}
+		if err := fm.write(bf); err != nil {
+			return err
+		}
+		f.field = fm
 	}
 
-	if err := e.w.Write(record); err != nil {
+	if err := e.w.Write([]interface{}{len(fields), bf.Bytes()}); err != nil {
 		return err
 	}
 
@@ -333,42 +347,24 @@ func (e *Encoder) encodeHeader(typ reflect.Type) error {
 }
 
 func (e *Encoder) marshal(v reflect.Value) error {
-	fields, buf, index, record, err := e.cache(v.Type())
+	if v == reflect.ValueOf(nil) {
+		return e.w.Write([]interface{}{})
+	}
+	fields, _, _, _, err := e.cache(v.Type())
 	if err != nil {
 		return err
 	}
-
-	for i, f := range fields {
+	var records []interface{}
+	for _, f := range fields {
 		v := walkIndex(v, f.index)
-
-		omitempty := f.tag.omitEmpty
-		if v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
-			// We should disable omitempty for pointer and interface values,
-			// because if it's nil we will automatically encode it as an empty
-			// string. However, the initialized pointer should not be affected,
-			// even if it's a default value.
-			omitempty = false
-		}
-
 		if !v.IsValid() {
-			index[i] = 0
+			records = append(records, nil)
 			continue
 		}
-
-		b, err := f.encodeFunc(buf, v, omitempty)
-		if err != nil {
-			return err
-		}
-		index[i], buf = len(b)-len(buf), b
+		records = append(records, v.Interface())
 	}
 
-	out := string(buf)
-	for i, n := range index {
-		record[i], out = out[:n], out[n:]
-	}
-	e.c.buf = buf[:0]
-
-	return e.w.Write(record)
+	return e.w.Write(records)
 }
 
 func (e *Encoder) tag() string {

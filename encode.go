@@ -4,17 +4,11 @@ import (
 	"encoding"
 	"encoding/base64"
 	"reflect"
-	"strconv"
 )
 
 var (
 	textMarshaler = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
-	csvMarshaler  = reflect.TypeOf((*Marshaler)(nil)).Elem()
-)
-
-var (
-	encodeFloat32 = encodeFloatN(32)
-	encodeFloat64 = encodeFloatN(64)
+	dbfMarshaler  = reflect.TypeOf((*Marshaler)(nil)).Elem()
 )
 
 type encodeFunc func(buf []byte, v reflect.Value, omitempty bool) ([]byte, error)
@@ -55,40 +49,6 @@ func encodeFuncValuePtr(fn reflect.Value) encodeFunc {
 
 func encodeString(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
 	return append(buf, v.String()...), nil
-}
-
-func encodeInt(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
-	n := v.Int()
-	if n == 0 && omitempty {
-		return buf, nil
-	}
-	return strconv.AppendInt(buf, n, 10), nil
-}
-
-func encodeUint(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
-	n := v.Uint()
-	if n == 0 && omitempty {
-		return buf, nil
-	}
-	return strconv.AppendUint(buf, n, 10), nil
-}
-
-func encodeFloatN(bits int) encodeFunc {
-	return func(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
-		f := v.Float()
-		if f == 0 && omitempty {
-			return buf, nil
-		}
-		return strconv.AppendFloat(buf, f, 'G', -1, bits), nil
-	}
-}
-
-func encodeBool(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
-	t := v.Bool()
-	if !t && omitempty {
-		return buf, nil
-	}
-	return strconv.AppendBool(buf, t), nil
 }
 
 func encodeInterface(funcMap map[reflect.Type]reflect.Value, funcs []reflect.Value) encodeFunc {
@@ -206,11 +166,11 @@ func encodeFn(typ reflect.Type, canAddr bool, funcMap map[reflect.Type]reflect.V
 		}
 	}
 
-	if typ.Implements(csvMarshaler) {
+	if typ.Implements(dbfMarshaler) {
 		return encodeMarshaler, nil
 	}
 
-	if canAddr && reflect.PtrTo(typ).Implements(csvMarshaler) {
+	if canAddr && reflect.PtrTo(typ).Implements(dbfMarshaler) {
 		return encodePtrMarshaler, nil
 	}
 
@@ -226,15 +186,15 @@ func encodeFn(typ reflect.Type, canAddr bool, funcMap map[reflect.Type]reflect.V
 	case reflect.String:
 		return encodeString, nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return encodeInt, nil
+		return nopEncode, nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return encodeUint, nil
+		return nopEncode, nil
 	case reflect.Float32:
-		return encodeFloat32, nil
+		return nopEncode, nil
 	case reflect.Float64:
-		return encodeFloat64, nil
+		return nopEncode, nil
 	case reflect.Bool:
-		return encodeBool, nil
+		return nopEncode, nil
 	case reflect.Interface:
 		return encodeInterface(funcMap, funcs), nil
 	case reflect.Ptr:
