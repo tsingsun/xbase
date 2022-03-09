@@ -40,9 +40,17 @@ func TestNewEncoder(t *testing.T) {
 			name: "NativeType-buffer", args: args{
 				iw: NewSeekableBuffer(),
 				in: []interface{}{
+					nil,
 					NativeType{Int: 1, Int8: 8, Int16: 16, Int32: 32, Int64: 64, UInt: 2, Uint8: 28, Uint16: 216, Uint32: 232, Uint64: 264, Float32: 32.32, Float64: 64.6464, String: "abcf", Bool: true},
 				},
-			}, wantErr: func(t assert.TestingT, err error, i ...interface{}) bool { return false },
+			}, wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+				for _, i3 := range i {
+					if isNilFixed(i3) {
+						return true
+					}
+				}
+				return false
+			},
 		},
 		{
 			name: "NativeType-file", args: args{

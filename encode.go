@@ -11,31 +11,34 @@ var (
 	dbfMarshaler  = reflect.TypeOf((*Marshaler)(nil)).Elem()
 )
 
-type encodeFunc func(buf []byte, v reflect.Value, omitempty bool) ([]byte, error)
+type encodeFunc func(v reflect.Value, omitempty bool) (interface{}, error)
 
-func nopEncode(buf []byte, _ reflect.Value, _ bool) ([]byte, error) {
-	return buf, nil
+func nopEncode(v reflect.Value, omitempty bool) (interface{}, error) {
+	if !v.IsValid() {
+		return nil, nil
+	}
+	return v.Interface(), nil
 }
 
 func encodeFuncValue(fn reflect.Value) encodeFunc {
-	return func(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
+	return func(v reflect.Value, omitempty bool) (interface{}, error) {
 		out := fn.Call([]reflect.Value{v})
 		err, _ := out[1].Interface().(error)
 		if err != nil {
 			return nil, err
 		}
-		return append(buf, out[0].Bytes()...), nil
+		return out, nil
 	}
 }
 
 func encodeFuncValuePtr(fn reflect.Value) encodeFunc {
-	return func(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
+	return func(v reflect.Value, omitempty bool) (interface{}, error) {
 		if !v.CanAddr() {
 			fallback, err := encodeFn(v.Type(), false, nil, nil)
 			if err != nil {
 				return nil, err
 			}
-			return fallback(buf, v, omitempty)
+			return fallback(v, omitempty)
 		}
 
 		out := fn.Call([]reflect.Value{v.Addr()})
@@ -43,18 +46,14 @@ func encodeFuncValuePtr(fn reflect.Value) encodeFunc {
 		if err != nil {
 			return nil, err
 		}
-		return append(buf, out[0].Bytes()...), nil
+		return out, nil
 	}
 }
 
-func encodeString(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
-	return append(buf, v.String()...), nil
-}
-
 func encodeInterface(funcMap map[reflect.Type]reflect.Value, funcs []reflect.Value) encodeFunc {
-	return func(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
+	return func(v reflect.Value, omitempty bool) (interface{}, error) {
 		if !v.IsValid() || v.IsNil() || !v.Elem().IsValid() {
-			return buf, nil
+			return nil, nil
 		}
 
 		v = v.Elem()
@@ -63,7 +62,7 @@ func encodeInterface(funcMap map[reflect.Type]reflect.Value, funcs []reflect.Val
 		switch v.Kind() {
 		case reflect.Ptr, reflect.Interface:
 			if v.IsNil() {
-				return buf, nil
+				return nil, nil
 			}
 		default:
 		}
@@ -72,56 +71,56 @@ func encodeInterface(funcMap map[reflect.Type]reflect.Value, funcs []reflect.Val
 		if err != nil {
 			return nil, err
 		}
-		return enc(buf, v, omitempty)
+		return enc(v, omitempty)
 	}
 }
 
-func encodePtrMarshaler(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
+func encodePtrMarshaler(v reflect.Value, omitempty bool) (interface{}, error) {
 	if v.CanAddr() {
-		return encodeMarshaler(buf, v.Addr(), omitempty)
+		return encodeMarshaler(v.Addr(), omitempty)
 	}
 
 	fallback, err := encodeFn(v.Type(), false, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return fallback(buf, v, omitempty)
+	return fallback(v, omitempty)
 }
 
-func encodeTextMarshaler(buf []byte, v reflect.Value, _ bool) ([]byte, error) {
+func encodeTextMarshaler(v reflect.Value, _ bool) (interface{}, error) {
 	if v.Kind() == reflect.Ptr && v.IsNil() {
-		return buf, nil
+		return nil, nil
 	}
 
 	b, err := v.Interface().(encoding.TextMarshaler).MarshalText()
 	if err != nil {
 		return nil, &MarshalerError{Type: v.Type(), MarshalerType: "MarshalText", Err: err}
 	}
-	return append(buf, b...), nil
+	return b, nil
 }
 
-func encodePtrTextMarshaler(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
+func encodePtrTextMarshaler(v reflect.Value, omitempty bool) (interface{}, error) {
 	if v.CanAddr() {
-		return encodeTextMarshaler(buf, v.Addr(), omitempty)
+		return encodeTextMarshaler(v.Addr(), omitempty)
 	}
 
 	fallback, err := encodeFn(v.Type(), false, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	return fallback(buf, v, omitempty)
+	return fallback(v, omitempty)
 }
 
-func encodeMarshaler(buf []byte, v reflect.Value, _ bool) ([]byte, error) {
+func encodeMarshaler(v reflect.Value, _ bool) (interface{}, error) {
 	if v.Kind() == reflect.Ptr && v.IsNil() {
-		return buf, nil
+		return nil, nil
 	}
 
 	b, err := v.Interface().(Marshaler).MarshalDBF()
 	if err != nil {
 		return nil, &MarshalerError{Type: v.Type(), MarshalerType: "MarshalCSV", Err: err}
 	}
-	return append(buf, b...), nil
+	return b, nil
 }
 
 func encodePtr(typ reflect.Type, canAddr bool, funcMap map[reflect.Type]reflect.Value, funcs []reflect.Value) (encodeFunc, error) {
@@ -129,20 +128,18 @@ func encodePtr(typ reflect.Type, canAddr bool, funcMap map[reflect.Type]reflect.
 	if err != nil {
 		return nil, err
 	}
-	return func(buf []byte, v reflect.Value, omitempty bool) ([]byte, error) {
+	return func(v reflect.Value, omitempty bool) (interface{}, error) {
 		if v.IsNil() {
-			return buf, nil
+			return nil, nil
 		}
-		return next(buf, v.Elem(), omitempty)
+		return next(v.Elem(), omitempty)
 	}, nil
 }
 
-func encodeBytes(buf []byte, v reflect.Value, _ bool) ([]byte, error) {
+func encodeBytes(v reflect.Value, _ bool) (interface{}, error) {
 	data := v.Bytes()
-
-	l := len(buf)
-	buf = append(buf, make([]byte, base64.StdEncoding.EncodedLen(len(data)))...)
-	base64.StdEncoding.Encode(buf[l:], data)
+	buf := make([]byte, base64.StdEncoding.EncodedLen(len(data)))
+	base64.StdEncoding.Encode(buf, data)
 	return buf, nil
 }
 
@@ -174,6 +171,11 @@ func encodeFn(typ reflect.Type, canAddr bool, funcMap map[reflect.Type]reflect.V
 		return encodePtrMarshaler, nil
 	}
 
+	//time
+	if typ.String() == "time.Time" {
+		return nopEncode, nil
+	}
+
 	if typ.Implements(textMarshaler) {
 		return encodeTextMarshaler, nil
 	}
@@ -184,7 +186,7 @@ func encodeFn(typ reflect.Type, canAddr bool, funcMap map[reflect.Type]reflect.V
 
 	switch typ.Kind() {
 	case reflect.String:
-		return encodeString, nil
+		return nopEncode, nil
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return nopEncode, nil
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:

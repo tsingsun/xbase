@@ -321,3 +321,48 @@ func TestCreateEditRec(t *testing.T) {
 	db.Close()
 	require.NoError(t, db.Error())
 }
+
+func TestXBase_AddX(t *testing.T) {
+	type args struct {
+		w  Writer
+		iw io.ReadWriteSeeker
+		in []*Rec
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name: "rec3-file", args: args{
+				iw: func() io.ReadWriteSeeker {
+					os.Remove("./testdata/test-rec3.dbf")
+					fs, err := os.Create("./testdata/test-rec3.dbf")
+					assert.NoError(t, err)
+					return fs
+				}(),
+				in: []*Rec{
+					{Name: "Abc", Flag: true, Count: 123, Price: 123.45, Date: time.Date(2021, 2, 12, 0, 0, 0, 0, time.UTC)},
+					nil,
+					{Name: "Мышь", Flag: false, Count: -321, Price: -54.32, Date: time.Date(2021, 2, 12, 0, 0, 0, 0, time.UTC)},
+				},
+			}, wantErr: func(t assert.TestingT, err error, i ...interface{}) bool { return false },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			xb := New(tt.args.iw)
+			xb.SetCodePage(866)
+			for _, rec := range tt.args.in {
+				assert.NoError(t, xb.Append(rec))
+			}
+			//xb.Flush()
+			xb.Close()
+			if tt.name == "rec3-file" {
+				wantBytes := readFile("./testdata/rec3.dbf")
+				gotBytes := readFile("./testdata/test-rec3.dbf")
+				assert.Equal(t, wantBytes, gotBytes)
+			}
+		})
+	}
+}

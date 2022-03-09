@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+const defaultTag = "dbf"
+
 type tag struct {
 	name      string
 	prefix    string

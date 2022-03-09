@@ -260,7 +260,7 @@ func (d *Decoder) Register(f interface{}) {
 
 	if typ.Kind() != reflect.Func ||
 		typ.NumIn() != 2 || typ.NumOut() != 1 ||
-		typ.In(0) != _bytes || typ.Out(0) != _error {
+		typ.In(0) != _inferface || typ.Out(0) != _error {
 		panic("xbase: func must be of type func([]byte, T) error")
 	}
 

@@ -16,27 +16,13 @@ type encField struct {
 
 type encCache struct {
 	fields []encField
-	buf    []byte
-	index  []int
-	record []string
 }
 
-func newEncCache(k typeKey, funcMap map[reflect.Type]reflect.Value, funcs []reflect.Value, header []string) (_ *encCache, err error) {
+func newEncCache(k typeKey, funcMap map[reflect.Type]reflect.Value, funcs []reflect.Value) (_ *encCache, err error) {
 	fields := cachedFields(k)
 	encFields := make([]encField, 0, len(fields))
 
-	// if header is not empty, we are going to track columns in a set and we will
-	// track which columns are covered by type fields.
-	set := make(map[string]bool, len(header))
-	for _, s := range header {
-		set[s] = false
-	}
-
 	for _, f := range fields {
-		if _, ok := set[f.name]; len(header) > 0 && !ok {
-			continue
-		}
-		set[f.name] = true
 		fm, err := NewField(f.name, f.tag.dbfType, f.tag.length, f.tag.decimal)
 		if err != nil {
 			return nil, err
@@ -53,30 +39,8 @@ func newEncCache(k typeKey, funcMap map[reflect.Type]reflect.Value, funcs []refl
 		})
 	}
 
-	if len(header) > 0 {
-		// look for columns that were defined in a header but are not present
-		// in the provided data type. In case we find any, we will set it to
-		// a no-op encoder that always produces an empty column.
-		for k, b := range set {
-			if b {
-				continue
-			}
-			encFields = append(encFields, encField{
-				fieldDescription: fieldDescription{
-					name: k,
-				},
-				encodeFunc: nopEncode,
-			})
-		}
-
-		sortEncFields(header, encFields)
-	}
-
 	return &encCache{
 		fields: encFields,
-		buf:    make([]byte, 0, defaultBufSize),
-		index:  make([]int, len(encFields)),
-		record: make([]string, len(encFields)),
 	}, nil
 }
 
@@ -106,7 +70,7 @@ type Encoder struct {
 
 	w          Writer
 	c          *encCache
-	header     []string
+	header     []*field
 	noHeader   bool
 	typeKey    typeKey
 	funcMap    map[reflect.Type]reflect.Value
@@ -124,7 +88,7 @@ func NewEncoder(w Writer) *Encoder {
 
 // Register registers a custom encoding function for a concrete type or interface.
 // The argument f must be of type:
-// 	func(T) ([]byte, error)
+// 	func(T) (interface{}, error)
 //
 // T must be a concrete type such as Foo or *Foo, or interface that has at
 // least one method.
@@ -146,8 +110,8 @@ func (e *Encoder) Register(f interface{}) {
 
 	if typ.Kind() != reflect.Func ||
 		typ.NumIn() != 1 || typ.NumOut() != 2 ||
-		typ.Out(0) != _bytes || typ.Out(1) != _error {
-		panic("xbase: func must be of type func(T) ([]byte, error)")
+		typ.Out(0) != _inferface || typ.Out(1) != _error {
+		panic("xbase: func must be of type func(T) (interface{}, error)")
 	}
 
 	argType := typ.In(0)
@@ -180,10 +144,9 @@ func (e *Encoder) Register(f interface{}) {
 //
 // SetHeader must be called before EncodeHeader and/or Encode in order to take
 // effect.
-func (enc *Encoder) SetHeader(header []string) {
-	cp := make([]string, len(header))
-	copy(cp, header)
-	enc.header = cp
+func (enc *Encoder) SetHeader(header []*field) {
+	enc.header = header
+	enc.noHeader = false
 }
 
 // Encode writes the DBF encoding of v to the output stream. The provided
@@ -321,7 +284,7 @@ func (e *Encoder) encodeArray(v reflect.Value) error {
 }
 
 func (e *Encoder) encodeHeader(typ reflect.Type) error {
-	fields, _, _, _, err := e.cache(typ)
+	fields, err := e.cache(typ)
 	if err != nil {
 		return err
 	}
@@ -347,24 +310,56 @@ func (e *Encoder) encodeHeader(typ reflect.Type) error {
 }
 
 func (e *Encoder) marshal(v reflect.Value) error {
-	if v == reflect.ValueOf(nil) {
+	if !v.IsValid() {
 		return e.w.Write([]interface{}{})
 	}
-	fields, _, _, _, err := e.cache(v.Type())
+	fields, err := e.cache(v.Type())
 	if err != nil {
 		return err
 	}
-	var records []interface{}
+	var fdata []interface{}
 	for _, f := range fields {
 		v := walkIndex(v, f.index)
+		omitempty := f.tag.omitEmpty
+		if v.Kind() == reflect.Ptr || v.Kind() == reflect.Interface {
+			// We should disable omitempty for pointer and interface values,
+			// because if it's nil we will automatically encode it as an empty
+			// string. However, the initialized pointer should not be affected,
+			// even if it's a default value.
+			omitempty = false
+		}
+
 		if !v.IsValid() {
-			records = append(records, nil)
+			fdata = append(fdata, nil)
 			continue
 		}
-		records = append(records, v.Interface())
+		fv, err := f.encodeFunc(v, omitempty)
+		if err != nil {
+			return err
+		}
+		if omitempty {
+			switch f.field.Type {
+			case FieldType_Character:
+				if fv == "" {
+					fdata = append(fdata, nil)
+					continue
+				}
+			case FieldType_Numeric, FieldType_Float:
+				if fv == 0 {
+					fdata = append(fdata, nil)
+					continue
+				}
+			case FieldType_Logical:
+				if fv == false {
+					fdata = append(fdata, nil)
+					continue
+				}
+			}
+		}
+		fdata = append(fdata, fv)
 	}
 
-	return e.w.Write(records)
+	return e.w.Write(fdata)
 }
 
 func (e *Encoder) tag() string {
@@ -374,15 +369,15 @@ func (e *Encoder) tag() string {
 	return e.Tag
 }
 
-func (e *Encoder) cache(typ reflect.Type) ([]encField, []byte, []int, []string, error) {
+func (e *Encoder) cache(typ reflect.Type) ([]encField, error) {
 	if k := (typeKey{e.tag(), typ}); k != e.typeKey {
-		c, err := newEncCache(k, e.funcMap, e.ifaceFuncs, e.header)
+		c, err := newEncCache(k, e.funcMap, e.ifaceFuncs)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, err
 		}
 		e.c, e.typeKey = c, k
 	}
-	return e.c.fields, e.c.buf[:0], e.c.index, e.c.record, nil
+	return e.c.fields, nil
 }
 
 func walkIndex(v reflect.Value, index []int) reflect.Value {

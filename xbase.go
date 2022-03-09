@@ -44,6 +44,9 @@ type XBase struct {
 	readStep int
 	// 0: noop; 1: head; 2: field; 3:record
 	writeStep int
+
+	marshal   *Encoder
+	unmarshal *Decoder
 }
 
 // New creates a XBase object to work with a DBF file.
@@ -202,9 +205,20 @@ func (db *XBase) readRecord() (val []string, err error) {
 	return
 }
 
+// DecodeRecord decode current row to a struct
+func (db *XBase) DecodeRecord(dst interface{}) (err error) {
+	if db.unmarshal == nil {
+		db.unmarshal, err = NewDecoder(db, db.Fields()...)
+		if err != nil {
+			return
+		}
+	}
+	return db.unmarshal.Decode(dst)
+}
+
 func (db *XBase) Write(input []interface{}) (err error) {
-	if db.recordNum != 0 {
-		// if has move record ptr
+	if len(db.fields) != 0 {
+		// has load field
 		db.writeStep = 2
 	}
 	switch db.writeStep {
@@ -231,6 +245,10 @@ func (db *XBase) Write(input []interface{}) (err error) {
 			return err
 		}
 		for i, value := range input {
+			if value == nil {
+				//if value is nil in add
+				continue
+			}
 			if err = db.fields[i].setValue(db.buffer, value, db.encoder); err != nil {
 				return err
 			}
@@ -342,6 +360,21 @@ func (db *XBase) Add() error {
 	return nil
 }
 
+// Append an input value,auto call save
+func (db *XBase) Append(input interface{}) error {
+	if db.marshal == nil {
+		db.marshal = NewEncoder(db)
+		db.marshal.SetHeader(db.fields)
+	}
+	if isNilFixed(input) {
+		if err := db.Add(); err != nil {
+			return err
+		}
+		return db.Save()
+	}
+	return db.marshal.Encode(input)
+}
+
 // Save writes changes to the file.
 // Before calling it, all changes to the object were made
 // only in memory and will be lost when you move to another record
@@ -398,6 +431,7 @@ func (db *XBase) Recall() {
 func (db *XBase) Clear() {
 	db.clearBuf()
 	db.err = nil
+	db.isAdd = false
 }
 
 // RecCount returns the number of records in the DBF file.
