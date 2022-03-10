@@ -65,7 +65,7 @@ func TestReadHeaderNotDBF(t *testing.T) {
 	r := bytes.NewReader(b)
 
 	h := &header{}
-	require.Panics(t, func() { h.read(r) })
+	require.Error(t, h.read(r))
 }
 
 func TestHeaderSetCodePage(t *testing.T) {
