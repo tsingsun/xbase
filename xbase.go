@@ -2,6 +2,7 @@ package xbase
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -49,12 +50,33 @@ type XBase struct {
 	unmarshal *Decoder
 }
 
-// New creates a XBase object to work with a DBF file.
-func New(seeker io.ReadWriteSeeker) *XBase {
-	return &XBase{
+// New creates a XBase object to work with a DBF file and an error if any.
+func New(seeker io.ReadWriteSeeker) (*XBase, error) {
+	db := XBase{
 		header: newHeader(),
 		rws:    seeker,
 	}
+	if db.rws != nil {
+		// may be empty
+		err := db.prepareReader()
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
+	}
+	return &db, nil
+}
+
+func (db *XBase) prepareReader() (err error) {
+	if err = db.header.read(db.rws); err != nil {
+		return
+	}
+
+	if err = db.readFields(db.rws); err != nil {
+		return
+	}
+	db.makeBuf()
+	db.SetCodePage(db.CodePage())
+	return
 }
 
 // CreateFile creates a new file in DBF format.
@@ -85,23 +107,14 @@ func Open(name string, readOnly bool) (db *XBase, err error) {
 	} else {
 		f, err = os.OpenFile(name, os.O_RDWR, 0666)
 	}
-	db = New(f)
+	db, err = New(f)
 	if err != nil {
 		return
 	}
-
-	if err = db.header.read(db.rws); err != nil {
-		return nil, err
-	}
-
-	if err = db.readFields(db.rws); err != nil {
-		return nil, err
-	}
-	db.makeBuf()
-	db.SetCodePage(db.CodePage())
 	return db, nil
 }
 
+// Flush commit changes to file
 func (db *XBase) Flush() (err error) {
 	if db.isMod {
 		db.header.setModDate(time.Now())
@@ -267,13 +280,13 @@ func (db *XBase) Write(input []interface{}) (err error) {
 // Fields are numbered starting from 1.
 func (db *XBase) FieldValueAsString(fieldNo int) (val string) {
 	if db.err != nil {
-		return ""
+		return
 	}
-	var f *field
-	if f, db.err = db.fieldByNo(fieldNo); db.err == nil {
-		val, db.err = f.stringValue(db.buffer, db.decoder)
+	defer db.wrapFieldError("FieldValueAsString", fieldNo)
+	var err error
+	if val, err = db.fieldByNo(fieldNo).stringValue(db.buffer, db.decoder); err != nil {
+		panic(err)
 	}
-	_ = db.wrapFieldError("FieldValueAsString", fieldNo, db.err)
 	return
 }
 
@@ -283,11 +296,11 @@ func (db *XBase) FieldValueAsInt(fieldNo int) (val int64) {
 	if db.err != nil {
 		return
 	}
-	var f *field
-	if f, db.err = db.fieldByNo(fieldNo); db.err == nil {
-		val, db.err = f.intValue(db.buffer)
+	defer db.wrapFieldError("FieldValueAsInt", fieldNo)
+	var err error
+	if val, err = db.fieldByNo(fieldNo).intValue(db.buffer); err != nil {
+		panic(err)
 	}
-	_ = db.wrapFieldError("FieldValueAsInt", fieldNo, db.err)
 	return
 }
 
@@ -297,11 +310,11 @@ func (db *XBase) FieldValueAsFloat(fieldNo int) (val float64) {
 	if db.err != nil {
 		return
 	}
-	var f *field
-	if f, db.err = db.fieldByNo(fieldNo); db.err == nil {
-		val, db.err = f.floatValue(db.buffer)
+	defer db.wrapFieldError("FieldValueAsFloat", fieldNo)
+	var err error
+	if val, err = db.fieldByNo(fieldNo).floatValue(db.buffer); err != nil {
+		panic(err)
 	}
-	_ = db.wrapFieldError("FieldValueAsFloat", fieldNo, db.err)
 	return
 }
 
@@ -311,27 +324,26 @@ func (db *XBase) FieldValueAsBool(fieldNo int) (val bool) {
 	if db.err != nil {
 		return
 	}
-	var f *field
-	if f, db.err = db.fieldByNo(fieldNo); db.err == nil {
-		val, db.err = f.boolValue(db.buffer)
+	defer db.wrapFieldError("FieldValueAsBool", fieldNo)
+	var err error
+	if val, err = db.fieldByNo(fieldNo).boolValue(db.buffer); err != nil {
+		panic(err)
 	}
-	_ = db.wrapFieldError("FieldValueAsBool", fieldNo, db.err)
 	return
 }
 
 // FieldValueAsDate returns the date value of the field of the current record.
 // Field type must be date ("D"). Fields are numbered starting from 1.
-func (db *XBase) FieldValueAsDate(fieldNo int) time.Time {
-	var d time.Time
+func (db *XBase) FieldValueAsDate(fieldNo int) (d time.Time) {
 	if db.err != nil {
-		return d
+		return
 	}
-	var f *field
-	if f, db.err = db.fieldByNo(fieldNo); db.err == nil {
-		d, db.err = f.dateValue(db.buffer)
+	defer db.wrapFieldError("FieldValueAsDate", fieldNo)
+	var err error
+	if d, err = db.fieldByNo(fieldNo).dateValue(db.buffer); err != nil {
+		panic(err)
 	}
-	_ = db.wrapFieldError("FieldValueAsDate", fieldNo, db.err)
-	return d
+	return
 }
 
 // SetFieldValue sets the field value of the current record.
@@ -341,12 +353,10 @@ func (db *XBase) SetFieldValue(fieldNo int, value interface{}) {
 	if db.err != nil {
 		return
 	}
-	var f *field
-	if f, db.err = db.fieldByNo(fieldNo); db.err == nil {
-		db.err = f.setValue(db.buffer, value, db.encoder)
+	defer db.wrapFieldError("SetFieldValue", fieldNo)
+	if err := db.fieldByNo(fieldNo).setValue(db.buffer, value, db.encoder); err != nil {
+		panic(err)
 	}
-
-	_ = db.wrapFieldError("SetFieldValue", fieldNo, db.err)
 }
 
 // Add adds a new empty record.
@@ -460,14 +470,14 @@ func (db *XBase) FieldNo(name string) int {
 // AddField adds a field to the structure of the DBF file.
 // This method can only be used before creating a new file.
 //
-// The following field types are supported: "C", "N", "L", "D".
+// The following field types are supported: "C", "N", "F", "L", "D".
 //
 // The opts parameter contains optional parameters: field length and number of decimal places.
 //
 // Examples:
 //     db.AddField("NAME", "C", 24)
 //     db.AddField("COUNT", "N", 8)
-//     db.AddField("PRICE", "N", 12, 2)
+//     db.AddField("PRICE", "F", 12, 2)
 //     db.AddField("FLAG", "L")
 //     db.AddField("DATE", "D")
 func (db *XBase) AddField(name string, typ string, opts ...int) error {
@@ -581,11 +591,12 @@ func (db *XBase) makeBuf() {
 	db.buffer = make([]byte, int(db.header.RecSize))
 }
 
-func (db *XBase) fieldByNo(fieldNo int) (*field, error) {
+// return the field by parameter.
+func (db *XBase) fieldByNo(fieldNo int) *field {
 	if fieldNo < 1 || fieldNo > len(db.fields) {
-		return nil, fmt.Errorf("field number out of range")
+		panic(fmt.Errorf("field number out of range"))
 	}
-	return db.fields[fieldNo-1], nil
+	return db.fields[fieldNo-1]
 }
 
 func (db *XBase) recCount() int64 {
@@ -609,17 +620,15 @@ func (db *XBase) checkRecNo() error {
 	return nil
 }
 
-func (db *XBase) wrapFieldError(s string, fieldNo int, err error) error {
-	if err == nil {
-		return nil
+func (db *XBase) wrapFieldError(s string, fieldNo int) {
+	if r := recover(); r != nil {
+		prefix := fmt.Sprintf("xbase: %s: field %d", s, fieldNo)
+		if fieldNo < 1 || fieldNo > len(db.fields) {
+			db.err = fmt.Errorf("%s: %w", prefix, r)
+		} else {
+			db.err = fmt.Errorf("%s %q: %w", prefix, db.fields[fieldNo-1].name(), r)
+		}
 	}
-	prefix := fmt.Sprintf("xbase: %s: field %d", s, fieldNo)
-	if fieldNo < 1 || fieldNo > len(db.fields) {
-		db.err = fmt.Errorf("%s: %w", prefix, err)
-		return db.err
-	}
-	db.err = fmt.Errorf("%s %q: %w", prefix, db.fields[fieldNo-1].name(), err)
-	return db.err
 }
 
 // seekRecord move the file ptr to the record start position
@@ -651,7 +660,7 @@ func (db *XBase) writeHeader() error {
 	return db.header.write(db.rws)
 }
 
-// writeFields write the field description
+// write the field description
 func (db *XBase) writeFields() error {
 	offset := 1 // deleted mark
 	for _, f := range db.fields {

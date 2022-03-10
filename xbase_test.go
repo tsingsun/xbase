@@ -50,7 +50,7 @@ func addFields(db *XBase) {
 }
 
 func TestCreateEmptyFile(t *testing.T) {
-	db := New(nil)
+	db, _ := New(nil)
 	addFields(db)
 	db.CreateFile("./testdata/test.dbf")
 
@@ -80,13 +80,13 @@ func TestSetFieldValueError(t *testing.T) {
 }
 
 func TestAddFieldError(t *testing.T) {
-	db := New(nil)
+	db, _ := New(nil)
 	err := db.AddField("NAME", "X", 10)
 	require.Error(t, err)
 }
 
 func TestAddEmptyRec(t *testing.T) {
-	db := New(nil)
+	db, _ := New(nil)
 	addFields(db)
 	db.CreateFile("./testdata/test.dbf")
 
@@ -107,7 +107,7 @@ func TestAddEmptyRec(t *testing.T) {
 }
 
 func TestAddRecords(t *testing.T) {
-	db := New(nil)
+	db, _ := New(nil)
 	addFields(db)
 	db.CreateFile("./testdata/test.dbf")
 
@@ -292,7 +292,7 @@ func TestOpenAddRec(t *testing.T) {
 }
 
 func TestCreateEditRec(t *testing.T) {
-	db := New(nil)
+	db, _ := New(nil)
 	db.AddField("NAME", "C", 3)
 	db.CreateFile("./testdata/test.dbf")
 
@@ -351,7 +351,8 @@ func TestXBase_AddX(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			xb := New(tt.args.iw)
+			xb, err := New(tt.args.iw)
+			assert.NoError(t, err)
 			xb.SetCodePage(866)
 			for _, rec := range tt.args.in {
 				assert.NoError(t, xb.Append(rec))

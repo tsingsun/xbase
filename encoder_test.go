@@ -68,7 +68,8 @@ func TestNewEncoder(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			xb := New(tt.args.iw)
+			xb, err := New(tt.args.iw)
+			assert.NoError(t, err)
 			enc := NewEncoder(xb)
 			for _, i := range tt.args.in {
 				err := enc.Encode(i)
@@ -112,10 +113,11 @@ func TestNewEncoderRec(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			xb := New(tt.args.iw)
+			xb, err := New(tt.args.iw)
+			assert.NoError(t, err)
 			xb.SetCodePage(866)
 			enc := NewEncoder(xb)
-			err := enc.Encode(tt.args.in)
+			err = enc.Encode(tt.args.in)
 			if tt.wantErr(t, err, tt.args.in) {
 				assert.Error(t, err)
 			} else {

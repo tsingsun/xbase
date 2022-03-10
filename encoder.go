@@ -145,8 +145,10 @@ func (e *Encoder) Register(f interface{}) {
 // SetHeader must be called before EncodeHeader and/or Encode in order to take
 // effect.
 func (enc *Encoder) SetHeader(header []*field) {
-	enc.header = header
-	enc.noHeader = false
+	if len(header) > 0 {
+		enc.header = header
+		enc.noHeader = false
+	}
 }
 
 // Encode writes the DBF encoding of v to the output stream. The provided
